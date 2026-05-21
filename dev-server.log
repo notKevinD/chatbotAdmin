@@ -1,0 +1,293 @@
+  ▲ Next.js 14.2.35
+  - Local:        http://localhost:3000
+  - Network:      http://[::1]:3000
+  - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 5s
+ ○ Compiling / ...
+ ✓ Compiled / in 7.7s (478 modules)
+ GET / 307 in 8105ms
+ ○ Compiling /login ...
+ ✓ Compiled /login in 11.2s (471 modules)
+ GET /login 200 in 11468ms
+ GET /login 200 in 39ms
+ GET /login 200 in 93ms
+ GET /login 200 in 47ms
+ ○ Compiling /api/auth/login ...
+ ✓ Compiled /api/auth/login in 1851ms (272 modules)
+ POST /api/auth/login 200 in 2250ms
+ ○ Compiling /api/admin/overview ...
+ ✓ Compiled /api/admin/overview in 1662ms (278 modules)
+ GET /api/admin/overview?range=week 200 in 3210ms
+ GET /api/admin/overview?range=week 200 in 179ms
+ ○ Compiling /api/admin/documents ...
+ ✓ Compiled /api/admin/documents in 1339ms (280 modules)
+ GET /api/admin/documents 200 in 1710ms
+ GET /api/admin/documents 200 in 166ms
+ ✓ Compiled /api/admin/chats in 350ms (282 modules)
+ GET /api/admin/chats 200 in 730ms
+ GET /api/admin/chats?session=a5dd2d64-a774-4384-a4e4-f6f64c01c2f9 200 in 90ms
+ GET /api/admin/documents 200 in 180ms
+ GET /api/admin/chats 200 in 196ms
+ GET /api/admin/documents 200 in 285ms
+ ✓ Compiled in 3.5s (502 modules)
+ ✓ Compiled in 1119ms (485 modules)
+ GET /login 200 in 435ms
+ ○ Compiling /api/admin/chats ...
+ ✓ Compiled /api/admin/chats in 700ms (276 modules)
+ GET /api/admin/chats 200 in 1616ms
+ GET /api/admin/chats?session=bb38c807-c8f7-4168-8f95-435c5c41a4a9 200 in 93ms
+ ✓ Compiled /api/admin/documents in 226ms (278 modules)
+ GET /api/admin/documents 200 in 392ms
+ GET /api/admin/documents 200 in 152ms
+ GET /api/admin/documents 200 in 237ms
+ GET /api/admin/chats 200 in 160ms
+ GET /api/admin/documents 200 in 134ms
+ GET /api/admin/chats 200 in 264ms
+ ✓ Compiled in 1450ms (471 modules)
+ ⚠ ./app/globals.css.webpack[javascript/auto]!=!./node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[14].oneOf[12].use[2]!./node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[14].oneOf[12].use[3]!./app/globals.css
+Warning
+
+(490:3) autoprefixer: end value has mixed support, consider using flex-end instead
+
+Import trace for requested module:
+./app/globals.css.webpack[javascript/auto]!=!./node_modules/next/dist/build/webpack/loaders/css-loader/src/index.js??ruleSet[1].rules[14].oneOf[12].use[2]!./node_modules/next/dist/build/webpack/loaders/postcss-loader/src/index.js??ruleSet[1].rules[14].oneOf[12].use[3]!./app/globals.css
+./app/globals.css
+ GET / 307 in 155ms
+ GET /login 200 in 51ms
+ GET / 307 in 119ms
+ GET /login 200 in 57ms
+<w> [webpack.cache.PackFileCacheStrategy] Skipped not serializable cache item 'Compilation/modules|C:\Users\User\Documents\New project\node_modules\next\dist\build\webpack\loaders\css-loader\src\index.js??ruleSet[1].rules[14].oneOf[12].use[2]!C:\Users\User\Documents\New project\node_modules\next\dist\build\webpack\loaders\postcss-loader\src\index.js??ruleSet[1].rules[14].oneOf[12].use[3]!C:\Users\User\Documents\New project\app\globals.css': No serializer registered for Warning
+<w> while serializing webpack/lib/cache/PackFileCacheStrategy.PackContentItems -> webpack/lib/NormalModule -> Array { 1 items } -> webpack/lib/ModuleWarning -> Warning
+ ✓ Compiled in 689ms (485 modules)
+ ✓ Compiled /api/admin/documents in 369ms (275 modules)
+ ⨯ Error: Cannot find module './276.js'
+Require stack:
+- C:\Users\User\Documents\New project\.next\server\webpack-runtime.js
+- C:\Users\User\Documents\New project\.next\server\app\api\admin\documents\route.js
+- C:\Users\User\Documents\New project\node_modules\next\dist\server\require.js
+- C:\Users\User\Documents\New project\node_modules\next\dist\server\load-components.js
+- C:\Users\User\Documents\New project\node_modules\next\dist\build\utils.js
+- C:\Users\User\Documents\New project\node_modules\next\dist\server\dev\hot-middleware.js
+- C:\Users\User\Documents\New project\node_modules\next\dist\server\dev\hot-reloader-webpack.js
+- C:\Users\User\Documents\New project\node_modules\next\dist\server\lib\router-utils\setup-dev-bundler.js
+- C:\Users\User\Documents\New project\node_modules\next\dist\server\lib\router-server.js
+- C:\Users\User\Documents\New project\node_modules\next\dist\server\lib\start-server.js
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1476:15)
+    at C:\Users\User\Documents\New project\node_modules\next\dist\server\require-hook.js:55:36
+    at wrapResolveFilename (node:internal/modules/cjs/loader:1049:27)
+    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1073:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1094:12)
+    at Module._load (node:internal/modules/cjs/loader:1262:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1576:12)
+    at mod.require (C:\Users\User\Documents\New project\node_modules\next\dist\server\require-hook.js:65:28)
+    at require (node:internal/modules/helpers:153:16)
+    at __webpack_require__.f.require (C:\Users\User\Documents\New project\.next\server\webpack-runtime.js:272:28)
+    at C:\Users\User\Documents\New project\.next\server\webpack-runtime.js:185:40
+    at Array.reduce (<anonymous>)
+    at __webpack_require__.e (C:\Users\User\Documents\New project\.next\server\webpack-runtime.js:184:67)
+    at Array.map (<anonymous>)
+    at __webpack_require__.X (C:\Users\User\Documents\New project\.next\server\webpack-runtime.js:236:22)
+    at C:\Users\User\Documents\New project\.next\server\app\api\admin\documents\route.js:50:639
+    at Object.<anonymous> (C:\Users\User\Documents\New project\.next\server\app\api\admin\documents\route.js:50:688)
+    at Module._compile (node:internal/modules/cjs/loader:1830:14)
+    at Object..js (node:internal/modules/cjs/loader:1961:10)
+    at Module.load (node:internal/modules/cjs/loader:1553:32)
+    at Module._load (node:internal/modules/cjs/loader:1355:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1576:12)
+    at mod.require (C:\Users\User\Documents\New project\node_modules\next\dist\server\require-hook.js:65:28)
+    at require (node:internal/modules/helpers:153:16)
+    at requirePage (C:\Users\User\Documents\New project\node_modules\next\dist\server\require.js:109:84)
+    at C:\Users\User\Documents\New project\node_modules\next\dist\server\load-components.js:103:84
+    at async loadComponentsImpl (C:\Users\User\Documents\New project\node_modules\next\dist\server\load-components.js:103:26)
+    at async DevServer.findPageComponentsImpl (C:\Users\User\Documents\New project\node_modules\next\dist\server\next-server.js:714:36)
+    at async DevServer.findPageComponents (C:\Users\User\Documents\New project\node_modules\next\dist\server\dev\next-dev-server.js:577:20)
+    at async DevServer.renderPageComponent (C:\Users\User\Documents\New project\node_modules\next\dist\server\base-server.js:1910:24)
+    at async DevServer.renderToResponseImpl (C:\Users\User\Documents\New project\node_modules\next\dist\server\base-server.js:1962:32)
+    at async DevServer.pipeImpl (C:\Users\User\Documents\New project\node_modules\next\dist\server\base-server.js:922:25)
+    at async NextNodeServer.handleCatchallRenderRequest (C:\Users\User\Documents\New project\node_modules\next\dist\server\next-server.js:272:17)
+    at async DevServer.handleRequestImpl (C:\Users\User\Documents\New project\node_modules\next\dist\server\base-server.js:818:17)
+    at async C:\Users\User\Documents\New project\node_modules\next\dist\server\dev\next-dev-server.js:339:20
+    at async Span.traceAsyncFn (C:\Users\User\Documents\New project\node_modules\next\dist\trace\trace.js:154:20)
+    at async DevServer.handleRequest (C:\Users\User\Documents\New project\node_modules\next\dist\server\dev\next-dev-server.js:336:24)
+    at async invokeRender (C:\Users\User\Documents\New project\node_modules\next\dist\server\lib\router-server.js:179:21)
+    at async handleRequest (C:\Users\User\Documents\New project\node_modules\next\dist\server\lib\router-server.js:359:24)
+    at async requestHandlerImpl (C:\Users\User\Documents\New project\node_modules\next\dist\server\lib\router-server.js:383:13)
+    at async Server.requestListener (C:\Users\User\Documents\New project\node_modules\next\dist\server\lib\start-server.js:141:13) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [
+    'C:\\Users\\User\\Documents\\New project\\.next\\server\\webpack-runtime.js',
+    'C:\\Users\\User\\Documents\\New project\\.next\\server\\app\\api\\admin\\documents\\route.js',
+    'C:\\Users\\User\\Documents\\New project\\node_modules\\next\\dist\\server\\require.js',
+    'C:\\Users\\User\\Documents\\New project\\node_modules\\next\\dist\\server\\load-components.js',
+    'C:\\Users\\User\\Documents\\New project\\node_modules\\next\\dist\\build\\utils.js',
+    'C:\\Users\\User\\Documents\\New project\\node_modules\\next\\dist\\server\\dev\\hot-middleware.js',
+    'C:\\Users\\User\\Documents\\New project\\node_modules\\next\\dist\\server\\dev\\hot-reloader-webpack.js',
+    'C:\\Users\\User\\Documents\\New project\\node_modules\\next\\dist\\server\\lib\\router-utils\\setup-dev-bundler.js',
+    'C:\\Users\\User\\Documents\\New project\\node_modules\\next\\dist\\server\\lib\\router-server.js',
+    'C:\\Users\\User\\Documents\\New project\\node_modules\\next\\dist\\server\\lib\\start-server.js'
+  ],
+  page: '/api/admin/documents'
+}
+ ○ Compiling /_error ...
+ ✓ Compiled /_error in 2.2s (729 modules)
+ GET /api/admin/documents 500 in 2872ms
+ ✓ Compiled /api/admin/overview in 459ms (319 modules)
+ GET /api/admin/overview?range=day 200 in 4800ms
+ GET /api/admin/overview?range=week 200 in 2178ms
+ ⨯ Error: Cannot find module './276.js'
+Require stack:
+- C:\Users\User\Documents\New project\.next\server\webpack-runtime.js
+- C:\Users\User\Documents\New project\.next\server\app\api\admin\overview\route.js
+- C:\Users\User\Documents\New project\node_modules\next\dist\server\require.js
+- C:\Users\User\Documents\New project\node_modules\next\dist\server\load-components.js
+- C:\Users\User\Documents\New project\node_modules\next\dist\build\utils.js
+- C:\Users\User\Documents\New project\node_modules\next\dist\server\dev\hot-middleware.js
+- C:\Users\User\Documents\New project\node_modules\next\dist\server\dev\hot-reloader-webpack.js
+- C:\Users\User\Documents\New project\node_modules\next\dist\server\lib\router-utils\setup-dev-bundler.js
+- C:\Users\User\Documents\New project\node_modules\next\dist\server\lib\router-server.js
+- C:\Users\User\Documents\New project\node_modules\next\dist\server\lib\start-server.js
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1476:15)
+    at C:\Users\User\Documents\New project\node_modules\next\dist\server\require-hook.js:55:36
+    at wrapResolveFilename (node:internal/modules/cjs/loader:1049:27)
+    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1073:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1094:12)
+    at Module._load (node:internal/modules/cjs/loader:1262:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1576:12)
+    at mod.require (C:\Users\User\Documents\New project\node_modules\next\dist\server\require-hook.js:65:28)
+    at require (node:internal/modules/helpers:153:16)
+    at __webpack_require__.f.require (C:\Users\User\Documents\New project\.next\server\webpack-runtime.js:272:28)
+    at C:\Users\User\Documents\New project\.next\server\webpack-runtime.js:185:40
+    at Array.reduce (<anonymous>)
+    at __webpack_require__.e (C:\Users\User\Documents\New project\.next\server\webpack-runtime.js:184:67)
+    at Array.map (<anonymous>)
+    at __webpack_require__.X (C:\Users\User\Documents\New project\.next\server\webpack-runtime.js:236:22)
+    at C:\Users\User\Documents\New project\.next\server\app\api\admin\documents\route.js:50:639
+    at Object.<anonymous> (C:\Users\User\Documents\New project\.next\server\app\api\admin\documents\route.js:50:688)
+    at Module._compile (node:internal/modules/cjs/loader:1830:14)
+    at Object..js (node:internal/modules/cjs/loader:1961:10)
+    at Module.load (node:internal/modules/cjs/loader:1553:32)
+    at Module._load (node:internal/modules/cjs/loader:1355:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.<anonymous> (node:internal/modules/cjs/loader:1576:12)
+    at mod.require (C:\Users\User\Documents\New project\node_modules\next\dist\server\require-hook.js:65:28)
+    at require (node:internal/modules/helpers:153:16)
+    at requirePage (C:\Users\User\Documents\New project\node_modules\next\dist\server\require.js:109:84)
+    at C:\Users\User\Documents\New project\node_modules\next\dist\server\load-components.js:103:84
+    at async loadComponentsImpl (C:\Users\User\Documents\New project\node_modules\next\dist\server\load-components.js:103:26)
+    at async DevServer.findPageComponentsImpl (C:\Users\User\Documents\New project\node_modules\next\dist\server\next-server.js:714:36)
+    at async DevServer.findPageComponents (C:\Users\User\Documents\New project\node_modules\next\dist\server\dev\next-dev-server.js:577:20)
+    at async DevServer.renderPageComponent (C:\Users\User\Documents\New project\node_modules\next\dist\server\base-server.js:1910:24)
+    at async DevServer.renderToResponseImpl (C:\Users\User\Documents\New project\node_modules\next\dist\server\base-server.js:1962:32)
+    at async DevServer.pipeImpl (C:\Users\User\Documents\New project\node_modules\next\dist\server\base-server.js:922:25)
+    at async NextNodeServer.handleCatchallRenderRequest (C:\Users\User\Documents\New project\node_modules\next\dist\server\next-server.js:272:17)
+    at async DevServer.handleRequestImpl (C:\Users\User\Documents\New project\node_modules\next\dist\server\base-server.js:818:17)
+    at async C:\Users\User\Documents\New project\node_modules\next\dist\server\dev\next-dev-server.js:339:20
+    at async Span.traceAsyncFn (C:\Users\User\Documents\New project\node_modules\next\dist\trace\trace.js:154:20)
+    at async DevServer.handleRequest (C:\Users\User\Documents\New project\node_modules\next\dist\server\dev\next-dev-server.js:336:24)
+    at async invokeRender (C:\Users\User\Documents\New project\node_modules\next\dist\server\lib\router-server.js:179:21)
+    at async handleRequest (C:\Users\User\Documents\New project\node_modules\next\dist\server\lib\router-server.js:359:24)
+    at async requestHandlerImpl (C:\Users\User\Documents\New project\node_modules\next\dist\server\lib\router-server.js:383:13)
+    at async Server.requestListener (C:\Users\User\Documents\New project\node_modules\next\dist\server\lib\start-server.js:141:13) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [
+    'C:\\Users\\User\\Documents\\New project\\.next\\server\\webpack-runtime.js',
+    'C:\\Users\\User\\Documents\\New project\\.next\\server\\app\\api\\admin\\overview\\route.js',
+    'C:\\Users\\User\\Documents\\New project\\node_modules\\next\\dist\\server\\require.js',
+    'C:\\Users\\User\\Documents\\New project\\node_modules\\next\\dist\\server\\load-components.js',
+    'C:\\Users\\User\\Documents\\New project\\node_modules\\next\\dist\\build\\utils.js',
+    'C:\\Users\\User\\Documents\\New project\\node_modules\\next\\dist\\server\\dev\\hot-middleware.js',
+    'C:\\Users\\User\\Documents\\New project\\node_modules\\next\\dist\\server\\dev\\hot-reloader-webpack.js',
+    'C:\\Users\\User\\Documents\\New project\\node_modules\\next\\dist\\server\\lib\\router-utils\\setup-dev-bundler.js',
+    'C:\\Users\\User\\Documents\\New project\\node_modules\\next\\dist\\server\\lib\\router-server.js',
+    'C:\\Users\\User\\Documents\\New project\\node_modules\\next\\dist\\server\\lib\\start-server.js'
+  ],
+  page: '/api/admin/documents'
+}
+ GET /api/admin/documents 500 in 46ms
+ ○ Compiling /_not-found ...
+ ✓ Compiled /_not-found in 551ms (735 modules)
+ GET / 404 in 899ms
+ GET /_next/static/css/app/layout.css?v=1778645235665 404 in 49ms
+ GET /_next/static/chunks/main-app.js?v=1778645235665 404 in 63ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 65ms
+ GET / 404 in 51ms
+ GET /_next/static/css/app/layout.css?v=1778645238481 404 in 39ms
+ GET /_next/static/chunks/main-app.js?v=1778645238481 404 in 92ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 90ms
+ GET / 404 in 51ms
+ GET /_next/static/css/app/layout.css?v=1778645247587 404 in 76ms
+ GET /_next/static/chunks/main-app.js?v=1778645247587 404 in 87ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 83ms
+ GET / 404 in 55ms
+ GET /_next/static/css/app/layout.css?v=1778645249152 404 in 40ms
+ GET /_next/static/chunks/main-app.js?v=1778645249152 404 in 76ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 71ms
+ GET / 404 in 47ms
+ GET /_next/static/css/app/layout.css?v=1778645250849 404 in 29ms
+ GET /_next/static/chunks/main-app.js?v=1778645250849 404 in 65ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 63ms
+ GET /_next/static/css/app/layout.css?v=1778645250849 404 in 49ms
+ GET /.well-known/appspecific/com.chrome.devtools.json 404 in 73ms
+ GET / 404 in 76ms
+ GET / 404 in 74ms
+ GET /_next/static/css/app/layout.css?v=1778645275247 404 in 45ms
+ GET /_next/static/chunks/main-app.js?v=1778645275247 404 in 86ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 82ms
+ GET / 404 in 86ms
+ GET /login 404 in 47ms
+ GET /_next/static/css/app/layout.css?v=1778645285557 404 in 56ms
+ GET /_next/static/chunks/main-app.js?v=1778645285557 404 in 68ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 67ms
+ GET /login 404 in 70ms
+ GET /_next/static/css/app/layout.css?v=1778645287020 404 in 49ms
+ GET /_next/static/chunks/main-app.js?v=1778645287020 404 in 47ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 45ms
+ GET /login 404 in 63ms
+ GET /_next/static/css/app/layout.css?v=1778645287827 404 in 33ms
+ GET /_next/static/chunks/main-app.js?v=1778645287827 404 in 67ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 66ms
+ GET /login 404 in 74ms
+ GET /_next/static/css/app/layout.css?v=1778645289698 404 in 40ms
+ GET /_next/static/chunks/main-app.js?v=1778645289698 404 in 54ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 51ms
+ GET /login 404 in 50ms
+ GET /_next/static/css/app/layout.css?v=1778645290336 404 in 43ms
+ GET /_next/static/chunks/main-app.js?v=1778645290336 404 in 79ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 76ms
+ GET /login 404 in 62ms
+ GET /_next/static/css/app/layout.css?v=1778645290676 404 in 39ms
+ GET /_next/static/chunks/main-app.js?v=1778645290676 404 in 44ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 41ms
+ GET /login 404 in 89ms
+ GET /_next/static/css/app/layout.css?v=1778645290956 404 in 31ms
+ GET /_next/static/chunks/main-app.js?v=1778645290956 404 in 64ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 52ms
+ GET /login 404 in 81ms
+ GET /_next/static/css/app/layout.css?v=1778645291647 404 in 37ms
+ GET /_next/static/chunks/main-app.js?v=1778645291647 404 in 45ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 29ms
+<w> [webpack.cache.PackFileCacheStrategy] Caching failed for pack: Error: ENOENT: no such file or directory, lstat 'C:\Users\User\Documents\New project\.next\server\app\api\admin\chats'
+<w> [webpack.cache.PackFileCacheStrategy/webpack.FileSystemInfo] Resolving '../../../../.next/server/app/api/admin/chats/route' in C:\Users\User\Documents\New project\node_modules\next\dist\server for build dependencies doesn't lead to expected result 'C:\Users\User\Documents\New project\.next\server\app\api\admin\chats\route.js', but to 'Error: Can't resolve '../../../../.next/server/app/api/admin/chats/route' in 'C:\Users\User\Documents\New project\node_modules\next\dist\server'' instead. Resolving dependencies are ignored for this path.
+<w>  at resolve commonjs file ../../../../.next/server/app/api/admin/chats/route (expected C:\Users\User\Documents\New project\.next\server\app\api\admin\chats\route.js)
+<w>  at file dependencies C:\Users\User\Documents\New project\node_modules\next\dist\server\require.js
+<w>  at file C:\Users\User\Documents\New project\node_modules\next\dist\server\require.js
+<w>  at file dependencies C:\Users\User\Documents\New project\node_modules\next\dist\server\load-components.js
+<w>  at file C:\Users\User\Documents\New project\node_modules\next\dist\server\load-components.js
+<w>  at file dependencies C:\Users\User\Documents\New project\node_modules\next\dist\build\utils.js
+<w>  at file C:\Users\User\Documents\New project\node_modules\next\dist\build\utils.js
+<w>  at file dependencies C:\Users\User\Documents\New project\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at file C:\Users\User\Documents\New project\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+<w>  at resolve commonjs C:\Users\User\Documents\New project\node_modules\next\dist\build\webpack\loaders\next-route-loader\index.js
+ GET /login 404 in 89ms
+ GET /_next/static/css/app/layout.css?v=1778645382796 404 in 36ms
+ GET /_next/static/chunks/main-app.js?v=1778645382796 404 in 46ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 44ms
+ GET /login 404 in 69ms
+ GET /_next/static/css/app/layout.css?v=1778645383576 404 in 35ms
+ GET /_next/static/chunks/main-app.js?v=1778645383576 404 in 64ms
+ GET /_next/static/chunks/app-pages-internals.js 404 in 63ms
