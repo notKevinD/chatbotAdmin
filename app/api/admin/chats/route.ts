@@ -3,6 +3,7 @@ import { getCurrentAdmin } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { formatDbError, getColumns, pickColumn, quoteIdent, rowsToJsonExpression, withClient } from "@/lib/db";
 import { isInternalAgentMessage, looksLikeAnswer, looksLikeQuestion, normalizeMessage } from "@/lib/normalize";
+import * as XLSX from "xlsx";
 
 type RangeName = "today" | "yesterday" | "this_week" | "last_week" | "this_month" | "last_month" | "custom";
 
@@ -137,8 +138,20 @@ function buildPairs(
   return pairs;
 }
 
-function toJsonl(rows: Array<Record<string, unknown>>) {
-  return rows.map((row) => JSON.stringify(row)).join("\n");
+function toExcelBuffer(rows: Array<Record<string, unknown>>) {
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  worksheet["!cols"] = [
+    { wch: 46 },
+    { wch: 58 },
+    { wch: 64 },
+    { wch: 38 },
+    { wch: 28 },
+    { wch: 22 },
+    { wch: 20 }
+  ];
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "RAGAS Export");
+  return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
 }
 
 export async function GET(request: Request) {
@@ -212,7 +225,7 @@ export async function GET(request: Request) {
           exportRows: filteredPairs.map((pair) => ({
             question: pair.question,
             answer: pair.answer,
-            contexts: [],
+            contexts: "",
             ground_truth: "",
             session_id: pair.sessionId,
             created_at: pair.createdAt || "",
@@ -351,10 +364,11 @@ export async function GET(request: Request) {
     });
 
     if ("exportRows" in data && Array.isArray(data.exportRows)) {
-      return new NextResponse(toJsonl(data.exportRows), {
+      const excelBuffer = toExcelBuffer(data.exportRows);
+      return new NextResponse(new Uint8Array(excelBuffer), {
         headers: {
-          "Content-Type": "application/x-ndjson; charset=utf-8",
-          "Content-Disposition": `attachment; filename="ragas-chat-export-${filter.range}.jsonl"`
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="ragas-chat-export-${filter.range}.xlsx"`
         }
       });
     }

@@ -226,7 +226,7 @@ export default function AdminApp() {
   async function loadDocuments(page = 1) {
     setError("");
     setLoading(true);
-    setLoadingText("Memuat daftar metadata RAG...");
+    setLoadingText("Memuat daftar file data chatbot...");
     try {
       const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) });
       if (ragSearch.trim()) params.set("q", ragSearch.trim());
@@ -237,7 +237,7 @@ export default function AdminApp() {
       setDocumentPagination(null);
       setSelectedMetadata("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal memuat data RAG.");
+      setError(err instanceof Error ? err.message : "Gagal memuat data chatbot.");
     } finally {
       setLoading(false);
       setLoadingText("");
@@ -248,7 +248,7 @@ export default function AdminApp() {
     setError("");
     setSelectedMetadata(metadataName);
     setLoading(true);
-    setLoadingText("Memuat detail dokumen RAG...");
+    setLoadingText("Memuat isi data chatbot...");
     try {
       const params = new URLSearchParams({
         metadata: metadataName,
@@ -260,7 +260,7 @@ export default function AdminApp() {
       setDocuments((data.rows || []) as DocumentRow[]);
       setDocumentPagination(data.pagination || null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal memuat detail data RAG.");
+      setError(err instanceof Error ? err.message : "Gagal memuat isi data chatbot.");
     } finally {
       setLoading(false);
       setLoadingText("");
@@ -332,7 +332,7 @@ export default function AdminApp() {
 
   const title = useMemo(() => {
     if (tab === "dashboard") return "Dashboard Penggunaan";
-    if (tab === "rag") return "Data RAG";
+    if (tab === "rag") return "Data Chatbot";
     return "Riwayat Chat";
   }, [tab]);
 
@@ -341,14 +341,14 @@ export default function AdminApp() {
       <aside className="sidebar">
         <div className="brand">
           <strong>AI Agent Admin</strong>
-          <span>n8n RAG pgvector</span>
+          <span>Admin chatbot PMB</span>
         </div>
         <nav className="nav" aria-label="Menu admin">
           <button className={`nav-button ${tab === "dashboard" ? "active" : ""}`} onClick={() => setTab("dashboard")}>
             Dashboard
           </button>
           <button className={`nav-button ${tab === "rag" ? "active" : ""}`} onClick={() => setTab("rag")}>
-            Data RAG
+            Data Chatbot
           </button>
           <button className={`nav-button ${tab === "chat" ? "active" : ""}`} onClick={() => setTab("chat")}>
             Chat
@@ -584,10 +584,6 @@ function safeJson(value: unknown) {
 
 function DocumentDetailDialog({ document, onClose }: { document: DocumentRow; onClose: () => void }) {
   const raw = document.raw || {};
-  const rawWithoutEmbedding = { ...raw };
-  if ("embedding" in rawWithoutEmbedding) {
-    rawWithoutEmbedding.embedding = "[embedding vector disembunyikan]";
-  }
   const content = String(
     raw.text ?? raw.content ?? raw.pageContent ?? raw.document ?? raw.page_content ?? document.preview ?? ""
   );
@@ -600,29 +596,22 @@ function DocumentDetailDialog({ document, onClose }: { document: DocumentRow; on
       <div aria-modal="true" className="detail-dialog" role="dialog">
         <div className="detail-head">
           <div>
-            <span className="eyebrow">Detail Chunk</span>
-            <h3>{document.metadata_name || "Dokumen RAG"}</h3>
-            <p className="mono">{document.id}</p>
+            <span className="eyebrow">Detail Data</span>
+            <h3>{document.metadata_name || "Data Chatbot"}</h3>
           </div>
-          <button aria-label="Tutup detail chunk" className="alert-close" onClick={onClose} type="button">
+          <button aria-label="Tutup detail data" className="alert-close" onClick={onClose} type="button">
             x
           </button>
         </div>
 
         <div className="detail-section">
-          <h4>Isi Chunk</h4>
-          <pre>{content || "Tidak ada konten teks di chunk ini."}</pre>
+          <h4>Isi Data</h4>
+          <pre>{content || "Tidak ada konten teks di data ini."}</pre>
         </div>
 
-        <div className="detail-grid">
-          <div className="detail-section">
-            <h4>Metadata</h4>
-            <pre>{safeJson(metadata)}</pre>
-          </div>
-          <div className="detail-section">
-            <h4>Raw Row</h4>
-            <pre>{safeJson(rawWithoutEmbedding)}</pre>
-          </div>
+        <div className="detail-section">
+          <h4>Sumber Data</h4>
+          <pre>{safeJson(metadata)}</pre>
         </div>
       </div>
     </div>
@@ -911,7 +900,7 @@ function RagPanel({
     if (duplicateWarning && mode !== "overwrite") {
       setConfirmDialog({
         title: "Timpa file lama?",
-        body: `File "${file.name}" sudah pernah diupload. Jika dilanjutkan, data RAG lama dari file ini akan dihapus dulu, lalu file baru dikirim ke n8n.`,
+        body: `File "${file.name}" sudah pernah diupload. Jika dilanjutkan, data chatbot lama dari file ini akan dihapus dulu, lalu file baru diproses.`,
         confirmLabel: "Timpa & Upload",
         onConfirm: () => upload("overwrite")
       });
@@ -934,8 +923,8 @@ function RagPanel({
       });
       setMessage(
         mode === "overwrite"
-          ? "Data lama ditimpa, upload dikirim ke webhook n8n, dan metadata file dicatat."
-          : "Upload dikirim ke webhook n8n dan metadata file dicatat."
+          ? "Data lama ditimpa, file berhasil dikirim untuk diproses, dan catatan file diperbarui."
+          : "File berhasil dikirim untuk diproses dan catatan file dicatat."
       );
       clearSelectedFile();
       await reload(1);
@@ -949,9 +938,9 @@ function RagPanel({
 
   function deleteMetadata(metadataName: string) {
     setConfirmDialog({
-      title: "Hapus metadata RAG?",
-      body: `Metadata "${metadataName}" dan semua chunk dokumen terkait akan dihapus. Tindakan ini tidak bisa dibatalkan.`,
-      confirmLabel: "Hapus Metadata",
+      title: "Hapus file data?",
+      body: `File data "${metadataName}" dan semua isi data terkait akan dihapus. Tindakan ini tidak bisa dibatalkan.`,
+      confirmLabel: "Hapus File",
       onConfirm: () => performDeleteMetadata(metadataName)
     });
   }
@@ -960,51 +949,17 @@ function RagPanel({
     setError("");
     setMessage("");
     setLoading(true);
-    setLoadingText("Menghapus metadata dan data RAG terkait...");
+    setLoadingText("Menghapus file data dan isi terkait...");
     try {
       await fetchJson("/api/admin/documents", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ metadataName })
       });
-      setMessage("Metadata dan data RAG terkait berhasil dihapus.");
+      setMessage("File data dan isi terkait berhasil dihapus.");
       await reload(metadataPagination?.page || 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal menghapus metadata.");
-    } finally {
-      setLoading(false);
-      setLoadingText("");
-    }
-  }
-
-  function deleteDocument(row: DocumentRow) {
-    setConfirmDialog({
-      title: "Hapus chunk dokumen?",
-      body: `Chunk "${row.metadata_name || row.id}" akan dihapus dari data RAG. Tindakan ini tidak bisa dibatalkan.`,
-      confirmLabel: "Hapus Chunk",
-      onConfirm: () => performDeleteDocument(row)
-    });
-  }
-
-  async function performDeleteDocument(row: DocumentRow) {
-    setError("");
-    setMessage("");
-    setLoading(true);
-    setLoadingText("Menghapus chunk dokumen...");
-    try {
-      await fetchJson("/api/admin/documents", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: row.id })
-      });
-      setMessage("Data RAG berhasil dihapus.");
-      if (selectedMetadata) {
-        await loadDetails(selectedMetadata, documentPagination?.page || 1);
-      } else {
-        await reload(metadataPagination?.page || 1);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal menghapus data.");
+      setError(err instanceof Error ? err.message : "Gagal menghapus file data.");
     } finally {
       setLoading(false);
       setLoadingText("");
@@ -1027,11 +982,11 @@ function RagPanel({
       );
       if (duplicateData.duplicate) {
         setDuplicateWarning(
-          `File "${selectedFile.name}" sudah pernah diupload. Hapus metadata lama dulu jika ingin upload ulang file yang sama.`
+          `File "${selectedFile.name}" sudah pernah diupload. Jika dilanjutkan, data lama akan ditimpa.`
         );
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal mengecek metadata file.");
+      setError(err instanceof Error ? err.message : "Gagal mengecek file data.");
     } finally {
       setCheckingDuplicate(false);
     }
@@ -1105,7 +1060,7 @@ function RagPanel({
             />
           </div>
         </div>
-        {checkingDuplicate ? <div className="inline-note">Mengecek metadata file...</div> : null}
+        {checkingDuplicate ? <div className="inline-note">Mengecek file data...</div> : null}
         {!excelPreview && duplicateWarning ? <div className="alert warning">{duplicateWarning}</div> : null}
       </section>
 
@@ -1165,11 +1120,11 @@ function RagPanel({
 
       <section className="table-wrap">
         <div className="table-title">
-          <h2>Daftar Metadata</h2>
+          <h2>Daftar File Data</h2>
           <div className="table-tools">
             <input
               className="input search-input"
-              placeholder="Cari nama file metadata..."
+              placeholder="Cari nama file data..."
               value={ragSearch}
               onChange={(event) => setRagSearch(event.target.value)}
               onKeyDown={(event) => {
@@ -1177,7 +1132,7 @@ function RagPanel({
               }}
             />
             <button className="button secondary" onClick={() => reload(1)}>
-              Search
+              Cari
             </button>
             <button
               className="button secondary"
@@ -1186,7 +1141,7 @@ function RagPanel({
                 window.setTimeout(() => reload(1), 0);
               }}
             >
-              Reset
+              Hapus Filter
             </button>
           </div>
         </div>
@@ -1194,9 +1149,9 @@ function RagPanel({
           <table>
             <thead>
               <tr>
-                <th>Metadata</th>
+                <th>File Data</th>
                 <th>Status Upload</th>
-                <th>Jumlah Chunk</th>
+                <th>Jumlah Data</th>
                 <th>Dibuat</th>
                 <th className="actions-col">Aksi</th>
               </tr>
@@ -1216,7 +1171,7 @@ function RagPanel({
                       Detail
                       </button>
                       <button className="button danger table-button" onClick={() => deleteMetadata(row.metadata_name)}>
-                      Delete
+                      Hapus
                       </button>
                     </div>
                   </td>
@@ -1225,7 +1180,7 @@ function RagPanel({
               {!metadataRows.length ? (
                 <tr>
                   <td colSpan={5} className="empty">
-                    Belum ada metadata RAG.
+                    Belum ada file data chatbot.
                   </td>
                 </tr>
               ) : null}
@@ -1237,12 +1192,12 @@ function RagPanel({
 
       <section className="table-wrap">
         <div className="table-title">
-          <h2>{selectedMetadata ? `Detail Dokumen: ${selectedMetadata}` : "Detail Dokumen"}</h2>
+          <h2>{selectedMetadata ? `Isi Data: ${selectedMetadata}` : "Isi Data"}</h2>
           <div className="table-tools">
             <input
               className="input search-input"
               disabled={!selectedMetadata}
-              placeholder="Cari isi chunk atau metadata..."
+              placeholder="Cari isi data..."
               value={documentSearch}
               onChange={(event) => setDocumentSearch(event.target.value)}
               onKeyDown={(event) => {
@@ -1254,7 +1209,7 @@ function RagPanel({
               disabled={!selectedMetadata}
               onClick={() => selectedMetadata && loadDetails(selectedMetadata, 1)}
             >
-              Search
+              Cari
             </button>
             <button
               className="button secondary"
@@ -1264,7 +1219,7 @@ function RagPanel({
                 if (selectedMetadata) window.setTimeout(() => loadDetails(selectedMetadata, 1), 0);
               }}
             >
-              Reset
+              Hapus Filter
             </button>
           </div>
         </div>
@@ -1272,23 +1227,18 @@ function RagPanel({
           <table>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Preview</th>
+                <th>Isi Data</th>
                 <th className="actions-col">Aksi</th>
               </tr>
             </thead>
             <tbody>
               {documents.map((row) => (
                 <tr key={`${row.id}-${row.metadata_name}`}>
-                  <td className="mono">{row.id}</td>
                   <td className="truncate">{row.preview}</td>
                   <td className="actions-cell">
                     <div className="table-actions">
                       <button className="button secondary table-button" onClick={() => setDetailDocument(row)}>
                       Detail
-                      </button>
-                      <button className="button danger table-button" onClick={() => deleteDocument(row)}>
-                        Delete
                       </button>
                     </div>
                   </td>
@@ -1296,8 +1246,8 @@ function RagPanel({
               ))}
               {!documents.length ? (
                 <tr>
-                  <td colSpan={3} className="empty">
-                    {selectedMetadata ? "Belum ada detail dokumen untuk metadata ini." : "Klik Detail pada metadata untuk melihat chunk dokumen."}
+                  <td colSpan={2} className="empty">
+                    {selectedMetadata ? "Belum ada isi data untuk file ini." : "Klik Detail pada file data untuk melihat isinya."}
                   </td>
                 </tr>
               ) : null}
@@ -1439,7 +1389,7 @@ function ChatPanel({
             }}
           />
           <button className="button secondary" onClick={() => loadSessions(1)} type="button">
-            Search
+            Cari
           </button>
           <button
             className="button secondary"
@@ -1449,10 +1399,10 @@ function ChatPanel({
             }}
             type="button"
           >
-            Reset
+            Hapus Filter
           </button>
           <button className="button secondary" onClick={exportRagas} type="button">
-            Ekspor RAGAS
+            Ekspor Evaluasi
           </button>
         </div>
       </section>
