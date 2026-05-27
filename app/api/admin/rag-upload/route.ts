@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/auth";
+import { getCurrentAdmin, isAuthenticated } from "@/lib/auth";
+import { writeAuditLog } from "@/lib/audit";
 import { formatDbError, getColumns, pickColumn, quoteIdent, withClient } from "@/lib/db";
 
 type UploadMode = "reject" | "overwrite" | "duplicate";
@@ -113,7 +114,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!(await isAuthenticated())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const admin = await getCurrentAdmin();
+  if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const webhook = process.env.N8N_RAG_UPLOAD_WEBHOOK;
   if (!webhook) {
@@ -207,16 +209,34 @@ export async function POST(request: Request) {
 
     if (!response.ok) {
       await upsertMetadataStatus(uploadFileName, "failed", text || "Webhook n8n gagal memproses upload.");
+      await writeAuditLog({
+        request,
+        userId: admin.id,
+        action: "upload_rag_failed",
+        detail: { fileName, uploadFileName, mode, duplicate, webhookStatus: response.status }
+      });
       return NextResponse.json({ error: "Webhook n8n gagal memproses upload.", detail: text }, { status: 502 });
     }
 
     await upsertMetadataStatus(uploadFileName, "success");
+    await writeAuditLog({
+      request,
+      userId: admin.id,
+      action: mode === "overwrite" ? "overwrite_rag_upload" : "upload_rag_success",
+      detail: { fileName, uploadFileName, mode, duplicate }
+    });
 
     return NextResponse.json({ ok: true, duplicate, mode, metadataName: uploadFileName, response: text });
   } catch (error) {
     if (typeof uploadFileName === "string") {
       await upsertMetadataStatus(uploadFileName, "failed", formatDbError(error, "Upload gagal.")).catch(() => undefined);
     }
+    await writeAuditLog({
+      request,
+      userId: admin.id,
+      action: "upload_rag_error",
+      detail: { fileName, uploadFileName, mode, error: formatDbError(error, "Upload gagal.") }
+    });
     return NextResponse.json({ error: formatDbError(error, "Upload gagal.") }, { status: 500 });
   }
 }

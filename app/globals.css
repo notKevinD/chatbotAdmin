@@ -743,6 +743,20 @@ button {
   padding: 18px 20px;
 }
 
+.table-tools {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.search-input {
+  min-height: 40px;
+  min-width: 260px;
+  padding: 8px 12px;
+}
+
 .top-list {
   display: grid;
   gap: 8px;

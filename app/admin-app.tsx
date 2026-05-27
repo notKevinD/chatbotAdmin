@@ -160,12 +160,15 @@ export default function AdminApp() {
   const [chatRange, setChatRange] = useState<Range>("this_week");
   const [chatCustomStartDate, setChatCustomStartDate] = useState("");
   const [chatCustomEndDate, setChatCustomEndDate] = useState("");
+  const [chatSearch, setChatSearch] = useState("");
   const [overview, setOverview] = useState<Overview | null>(null);
   const [metadataRows, setMetadataRows] = useState<MetadataRow[]>([]);
   const [metadataPagination, setMetadataPagination] = useState<PaginationInfo | null>(null);
   const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [documentPagination, setDocumentPagination] = useState<PaginationInfo | null>(null);
   const [selectedMetadata, setSelectedMetadata] = useState("");
+  const [ragSearch, setRagSearch] = useState("");
+  const [documentSearch, setDocumentSearch] = useState("");
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [sessionPagination, setSessionPagination] = useState<PaginationInfo | null>(null);
   const [selectedSession, setSelectedSession] = useState("");
@@ -225,7 +228,9 @@ export default function AdminApp() {
     setLoading(true);
     setLoadingText("Memuat daftar metadata RAG...");
     try {
-      const data = await fetchJson<DocumentsResponse>(`/api/admin/documents?page=${page}&limit=${PAGE_SIZE}`);
+      const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE) });
+      if (ragSearch.trim()) params.set("q", ragSearch.trim());
+      const data = await fetchJson<DocumentsResponse>(`/api/admin/documents?${params.toString()}`);
       setMetadataRows((data.rows || []) as unknown as MetadataRow[]);
       setMetadataPagination(data.pagination || null);
       setDocuments([]);
@@ -245,9 +250,13 @@ export default function AdminApp() {
     setLoading(true);
     setLoadingText("Memuat detail dokumen RAG...");
     try {
-      const data = await fetchJson<DocumentsResponse>(
-        `/api/admin/documents?metadata=${encodeURIComponent(metadataName)}&page=${page}&limit=${PAGE_SIZE}`
-      );
+      const params = new URLSearchParams({
+        metadata: metadataName,
+        page: String(page),
+        limit: String(PAGE_SIZE)
+      });
+      if (documentSearch.trim()) params.set("q", documentSearch.trim());
+      const data = await fetchJson<DocumentsResponse>(`/api/admin/documents?${params.toString()}`);
       setDocuments((data.rows || []) as DocumentRow[]);
       setDocumentPagination(data.pagination || null);
     } catch (err) {
@@ -264,6 +273,7 @@ export default function AdminApp() {
     setLoadingText("Memuat session pengguna...");
     try {
       const params = new URLSearchParams({ page: String(page), limit: String(PAGE_SIZE), range: chatRange });
+      if (chatSearch.trim()) params.set("q", chatSearch.trim());
       if (chatRange === "custom") {
         if (chatCustomStartDate) params.set("startDate", chatCustomStartDate);
         if (chatCustomEndDate) params.set("endDate", chatCustomEndDate);
@@ -296,6 +306,7 @@ export default function AdminApp() {
         limit: "5",
         range: chatRange
       });
+      if (chatSearch.trim()) params.set("q", chatSearch.trim());
       if (chatRange === "custom") {
         if (chatCustomStartDate) params.set("startDate", chatCustomStartDate);
         if (chatCustomEndDate) params.set("endDate", chatCustomEndDate);
@@ -424,6 +435,10 @@ export default function AdminApp() {
             documents={documents}
             documentPagination={documentPagination}
             selectedMetadata={selectedMetadata}
+            ragSearch={ragSearch}
+            setRagSearch={setRagSearch}
+            documentSearch={documentSearch}
+            setDocumentSearch={setDocumentSearch}
             loading={loading}
             setLoading={setLoading}
             setLoadingText={setLoadingText}
@@ -443,6 +458,8 @@ export default function AdminApp() {
             setCustomStartDate={setChatCustomStartDate}
             customEndDate={chatCustomEndDate}
             setCustomEndDate={setChatCustomEndDate}
+            search={chatSearch}
+            setSearch={setChatSearch}
             pairs={chatPairs}
             chatPagination={chatPagination}
             loadSessions={loadSessions}
@@ -839,6 +856,10 @@ function RagPanel({
   documents,
   documentPagination,
   selectedMetadata,
+  ragSearch,
+  setRagSearch,
+  documentSearch,
+  setDocumentSearch,
   loading,
   setLoading,
   setLoadingText,
@@ -852,6 +873,10 @@ function RagPanel({
   documents: DocumentRow[];
   documentPagination: PaginationInfo | null;
   selectedMetadata: string;
+  ragSearch: string;
+  setRagSearch: (value: string) => void;
+  documentSearch: string;
+  setDocumentSearch: (value: string) => void;
   loading: boolean;
   setLoading: (value: boolean) => void;
   setLoadingText: (value: string) => void;
@@ -1141,9 +1166,29 @@ function RagPanel({
       <section className="table-wrap">
         <div className="table-title">
           <h2>Daftar Metadata</h2>
-          <button className="button secondary" onClick={() => reload(metadataPagination?.page || 1)}>
-            Refresh
-          </button>
+          <div className="table-tools">
+            <input
+              className="input search-input"
+              placeholder="Cari nama file metadata..."
+              value={ragSearch}
+              onChange={(event) => setRagSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") reload(1);
+              }}
+            />
+            <button className="button secondary" onClick={() => reload(1)}>
+              Search
+            </button>
+            <button
+              className="button secondary"
+              onClick={() => {
+                setRagSearch("");
+                window.setTimeout(() => reload(1), 0);
+              }}
+            >
+              Reset
+            </button>
+          </div>
         </div>
         <div className="table-scroll">
           <table>
@@ -1193,6 +1238,35 @@ function RagPanel({
       <section className="table-wrap">
         <div className="table-title">
           <h2>{selectedMetadata ? `Detail Dokumen: ${selectedMetadata}` : "Detail Dokumen"}</h2>
+          <div className="table-tools">
+            <input
+              className="input search-input"
+              disabled={!selectedMetadata}
+              placeholder="Cari isi chunk atau metadata..."
+              value={documentSearch}
+              onChange={(event) => setDocumentSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && selectedMetadata) loadDetails(selectedMetadata, 1);
+              }}
+            />
+            <button
+              className="button secondary"
+              disabled={!selectedMetadata}
+              onClick={() => selectedMetadata && loadDetails(selectedMetadata, 1)}
+            >
+              Search
+            </button>
+            <button
+              className="button secondary"
+              disabled={!selectedMetadata}
+              onClick={() => {
+                setDocumentSearch("");
+                if (selectedMetadata) window.setTimeout(() => loadDetails(selectedMetadata, 1), 0);
+              }}
+            >
+              Reset
+            </button>
+          </div>
         </div>
         <div className="table-scroll">
           <table>
@@ -1268,6 +1342,8 @@ function ChatPanel({
   setCustomStartDate,
   customEndDate,
   setCustomEndDate,
+  search,
+  setSearch,
   pairs,
   chatPagination,
   loadSessions,
@@ -1282,6 +1358,8 @@ function ChatPanel({
   setCustomStartDate: (value: string) => void;
   customEndDate: string;
   setCustomEndDate: (value: string) => void;
+  search: string;
+  setSearch: (value: string) => void;
   pairs: ChatPair[];
   chatPagination: PaginationInfo | null;
   loadSessions: (page?: number) => Promise<void>;
@@ -1289,6 +1367,7 @@ function ChatPanel({
 }) {
   function exportRagas() {
     const params = new URLSearchParams({ export: "ragas", range });
+    if (search.trim()) params.set("q", search.trim());
     if (range === "custom") {
       if (customStartDate) params.set("startDate", customStartDate);
       if (customEndDate) params.set("endDate", customEndDate);
@@ -1350,6 +1429,28 @@ function ChatPanel({
           </div>
         ) : null}
         <div className="report-actions">
+          <input
+            className="input search-input"
+            placeholder="Cari session, pertanyaan, atau jawaban..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") loadSessions(1);
+            }}
+          />
+          <button className="button secondary" onClick={() => loadSessions(1)} type="button">
+            Search
+          </button>
+          <button
+            className="button secondary"
+            onClick={() => {
+              setSearch("");
+              window.setTimeout(() => loadSessions(1), 0);
+            }}
+            type="button"
+          >
+            Reset
+          </button>
           <button className="button secondary" onClick={exportRagas} type="button">
             Ekspor RAGAS
           </button>

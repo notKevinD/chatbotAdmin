@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/auth";
+import { getCurrentAdmin } from "@/lib/auth";
+import { writeAuditLog } from "@/lib/audit";
 import { formatDbError, getColumns, pickColumn, quoteIdent, rowsToJsonExpression, withClient } from "@/lib/db";
 import { isInternalAgentMessage, looksLikeAnswer, looksLikeQuestion, normalizeMessage } from "@/lib/normalize";
 
@@ -141,11 +142,13 @@ function toJsonl(rows: Array<Record<string, unknown>>) {
 }
 
 export async function GET(request: Request) {
-  if (!(await isAuthenticated())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const admin = await getCurrentAdmin();
+  if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const url = new URL(request.url);
   const session = url.searchParams.get("session");
   const exportType = url.searchParams.get("export");
+  const search = (url.searchParams.get("q") || "").trim();
   const filter = getFilter(url.searchParams);
   const page = Math.max(Number(url.searchParams.get("page") || "1"), 1);
   const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || "10"), 1), 100);
@@ -189,9 +192,24 @@ export async function GET(request: Request) {
           }))
           .filter((item) => !isInternalAgentMessage(item.role, item.content));
         const pairs = buildPairs(messages);
+        const filteredPairs = search
+          ? pairs.filter(
+              (pair) =>
+                pair.sessionId.toLowerCase().includes(search.toLowerCase()) ||
+                pair.question.toLowerCase().includes(search.toLowerCase()) ||
+                pair.answer.toLowerCase().includes(search.toLowerCase())
+            )
+          : pairs;
+
+        await writeAuditLog({
+          request,
+          userId: admin.id,
+          action: "export_ragas_chat",
+          detail: { range: filter.range, search, total: filteredPairs.length }
+        });
 
         return {
-          exportRows: pairs.map((pair) => ({
+          exportRows: filteredPairs.map((pair) => ({
             question: pair.question,
             answer: pair.answer,
             contexts: [],
@@ -228,6 +246,13 @@ export async function GET(request: Request) {
           m.${quoteIdent(sessionColumn)}::text = cs.${quoteIdent(sessionIdColumn)}::text
           ${timeColumn ? `and ${timeCondition}` : ""}
         `;
+        const searchCondition = search
+          ? `where cs.${quoteIdent(sessionIdColumn)}::text ilike $${timeParams.length + 1}::text
+              or m.message::text ilike $${timeParams.length + 1}::text`
+          : "";
+        const searchParams = search ? [`%${search}%`] : [];
+        const limitParam = timeParams.length + searchParams.length + 1;
+        const offsetParam = timeParams.length + searchParams.length + 2;
 
         const [countResult, sessions] = await Promise.all([
           client.query<{ total: number }>(
@@ -237,10 +262,11 @@ export async function GET(request: Request) {
                 select cs.${quoteIdent(sessionIdColumn)}
                 from ${sessionInfo.table.sql} cs
                 join ${info.table.sql} m on ${joinCondition}
+                ${searchCondition}
                 group by cs.${quoteIdent(sessionIdColumn)}
               ) filtered_sessions
             `,
-            timeParams
+            [...timeParams, ...searchParams]
           ),
           client.query<{ sessionId: string; total: number; lastSeen?: string }>(
             `
@@ -256,11 +282,12 @@ export async function GET(request: Request) {
                 ${lastSeenExpression} as "lastSeen"
               from ${sessionInfo.table.sql} cs
               join ${info.table.sql} m on ${joinCondition}
+              ${searchCondition}
               group by cs.${quoteIdent(sessionIdColumn)} ${lastUsedColumn ? `, cs.${quoteIdent(lastUsedColumn)}` : ""}
               ${orderExpression ? `order by ${orderExpression}` : ""}
-              limit $${timeParams.length + 1}::int offset $${timeParams.length + 2}::int
+              limit $${limitParam}::int offset $${offsetParam}::int
             `,
-            [...timeParams, limit, offset]
+            [...timeParams, ...searchParams, limit, offset]
           )
         ]);
         const total = countResult.rows[0]?.total || 0;
@@ -299,8 +326,16 @@ export async function GET(request: Request) {
         .filter((item) => !isInternalAgentMessage(item.role, item.content));
 
       const pairs = buildPairs(messages);
-      const total = pairs.length;
-      const paginatedPairs = pairs.slice(offset, offset + limit);
+      const filteredPairs = search
+        ? pairs.filter(
+            (pair) =>
+              pair.sessionId.toLowerCase().includes(search.toLowerCase()) ||
+              pair.question.toLowerCase().includes(search.toLowerCase()) ||
+              pair.answer.toLowerCase().includes(search.toLowerCase())
+          )
+        : pairs;
+      const total = filteredPairs.length;
+      const paginatedPairs = filteredPairs.slice(offset, offset + limit);
 
       return {
         session,

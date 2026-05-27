@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/auth";
+import { getCurrentAdmin } from "@/lib/auth";
+import { writeAuditLog } from "@/lib/audit";
 import {
   formatDbError,
   getColumns,
@@ -10,11 +11,12 @@ import {
 } from "@/lib/db";
 
 export async function GET(request: Request) {
-  if (!(await isAuthenticated()))
+  if (!(await getCurrentAdmin()))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const url = new URL(request.url);
   const selectedMetadata = url.searchParams.get("metadata");
+  const search = (url.searchParams.get("q") || "").trim();
   const page = Math.max(Number(url.searchParams.get("page") || "1"), 1);
   const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || "10"), 1), 100);
   const offset = (page - 1) * limit;
@@ -68,9 +70,18 @@ export async function GET(request: Request) {
           : "'Tanpa metadata'";
 
       if (!selectedMetadata) {
+        const metadataFilter = search
+          ? `where mt.${quoteIdent(metadataNameColumn)}::text ilike $1::text`
+          : "";
+        const countParams = search ? [`%${search}%`] : [];
+        const listParams = search ? [`%${search}%`, limit, offset] : [limit, offset];
+        const limitParam = search ? "$2" : "$1";
+        const offsetParam = search ? "$3" : "$2";
+
         const [countResult, result] = await Promise.all([
           client.query(
-            `select count(*)::int as total from ${metadataInfo.table.sql}`,
+            `select count(*)::int as total from ${metadataInfo.table.sql} mt ${metadataFilter}`,
+            countParams
           ),
           client.query(
           `
@@ -83,14 +94,15 @@ export async function GET(request: Request) {
             from ${metadataInfo.table.sql} mt
             left join ${info.table.sql} d
               on ${metaColumn ? `${metadataNameExpression} = mt.${quoteIdent(metadataNameColumn)}::text` : "false"}
+            ${metadataFilter}
             group by mt.${quoteIdent(metadataNameColumn)}
               ${metadataCreatedColumn ? `, mt.${quoteIdent(metadataCreatedColumn)}` : ""}
               ${metadataStatusColumn ? `, mt.${quoteIdent(metadataStatusColumn)}` : ""}
               ${metadataErrorColumn ? `, mt.${quoteIdent(metadataErrorColumn)}` : ""}
             order by ${metadataCreatedColumn ? `mt.${quoteIdent(metadataCreatedColumn)} desc` : `mt.${quoteIdent(metadataNameColumn)} asc`}
-            limit $1::int offset $2::int
+            limit ${limitParam}::int offset ${offsetParam}::int
           `,
-            [limit, offset],
+            listParams,
           ),
         ]);
         const total = countResult.rows[0]?.total || 0;
@@ -107,14 +119,25 @@ export async function GET(request: Request) {
         };
       }
 
+      const documentSearchCondition = search
+        ? `and (
+            ${contentColumn ? `d.${quoteIdent(contentColumn)}::text ilike $2::text or` : ""}
+            ${metaColumn ? `d.${quoteIdent(metaColumn)}::text ilike $2::text` : "false"}
+          )`
+        : "";
+      const detailParams = search ? [selectedMetadata, `%${search}%`] : [selectedMetadata];
+      const detailLimitParam = search ? "$3" : "$2";
+      const detailOffsetParam = search ? "$4" : "$3";
+
       const [countResult, result] = await Promise.all([
         client.query(
           `
             select count(*)::int as total
             from ${info.table.sql} d
             where ${metadataNameExpression} = $1::text
+              ${documentSearchCondition}
           `,
-          [selectedMetadata],
+          detailParams,
         ),
         client.query(
         `
@@ -125,9 +148,10 @@ export async function GET(request: Request) {
             ${rowsToJsonExpression("d", info.columns)} as raw
           from ${info.table.sql} d
           where ${metadataNameExpression} = $1::text
-          limit $2::int offset $3::int
+            ${documentSearchCondition}
+          limit ${detailLimitParam}::int offset ${detailOffsetParam}::int
         `,
-          [selectedMetadata, limit, offset],
+          [...detailParams, limit, offset],
         ),
       ]);
       const total = countResult.rows[0]?.total || 0;
@@ -158,7 +182,8 @@ export async function GET(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  if (!(await isAuthenticated()))
+  const admin = await getCurrentAdmin();
+  if (!admin)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id, metadataName } = await request.json().catch(() => ({}));
@@ -177,10 +202,17 @@ export async function DELETE(request: Request) {
       const metaColumn = pickColumn(info.columns, ["metadata"]);
 
       if (id && idColumn) {
-        return client.query(
+        const deleteResult = await client.query(
           `delete from ${info.table.sql} where ${quoteIdent(idColumn)}::text = $1`,
           [String(id)],
         );
+        await writeAuditLog({
+          request,
+          userId: admin.id,
+          action: "delete_rag_chunk",
+          detail: { id: String(id), deletedDocuments: deleteResult.rowCount || 0 }
+        });
+        return deleteResult;
       }
 
       if (metadataName && metaColumn) {
@@ -211,6 +243,13 @@ export async function DELETE(request: Request) {
             [String(metadataName)],
           );
         }
+
+        await writeAuditLog({
+          request,
+          userId: admin.id,
+          action: "delete_rag_metadata",
+          detail: { metadataName: String(metadataName), deletedDocuments: deleteDocuments.rowCount || 0 }
+        });
 
         return deleteDocuments;
       }
