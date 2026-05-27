@@ -621,12 +621,16 @@ function DocumentDetailDialog({ document, onClose }: { document: DocumentRow; on
 function ExcelPreviewDialog({
   preview,
   duplicateWarning,
+  uploadError,
+  uploadMessage,
   loading,
   onCancel,
   onUpload
 }: {
   preview: ExcelPreview;
   duplicateWarning: string;
+  uploadError: string;
+  uploadMessage: string;
   loading: boolean;
   onCancel: () => void;
   onUpload: () => void;
@@ -651,6 +655,8 @@ function ExcelPreviewDialog({
         </div>
 
         {duplicateWarning ? <div className="alert warning">{duplicateWarning}</div> : null}
+        {uploadError ? <div className="alert error">{uploadError}</div> : null}
+        {uploadMessage ? <div className="alert success">{uploadMessage}</div> : null}
 
         <div className="sheet-tabs" aria-label="Daftar sheet Excel">
           {preview.sheets.map((sheet) => (
@@ -878,6 +884,8 @@ function RagPanel({
   const [file, setFile] = useState<File | null>(null);
   const [excelPreview, setExcelPreview] = useState<ExcelPreview | null>(null);
   const [duplicateWarning, setDuplicateWarning] = useState("");
+  const [uploadModalError, setUploadModalError] = useState("");
+  const [uploadModalMessage, setUploadModalMessage] = useState("");
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
@@ -887,6 +895,8 @@ function RagPanel({
     setFile(null);
     setExcelPreview(null);
     setDuplicateWarning("");
+    setUploadModalError("");
+    setUploadModalMessage("");
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -911,6 +921,8 @@ function RagPanel({
     setLoadingText("Mengupload file dan menunggu proses webhook n8n...");
     setError("");
     setMessage("");
+    setUploadModalError("");
+    setUploadModalMessage("");
 
     const form = new FormData();
     form.set("file", file);
@@ -921,15 +933,18 @@ function RagPanel({
         method: "POST",
         body: form
       });
-      setMessage(
+      const successMessage =
         mode === "overwrite"
           ? "Data lama ditimpa, file berhasil dikirim untuk diproses, dan catatan file diperbarui."
-          : "File berhasil dikirim untuk diproses dan catatan file dicatat."
-      );
+          : "File berhasil dikirim untuk diproses dan catatan file dicatat.";
+      setUploadModalMessage(successMessage);
+      setMessage(successMessage);
       clearSelectedFile();
       await reload(1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload gagal.");
+      const uploadError = err instanceof Error ? err.message : "Upload gagal.";
+      setUploadModalError(uploadError);
+      setError(uploadError);
     } finally {
       setLoading(false);
       setLoadingText("");
@@ -971,6 +986,8 @@ function RagPanel({
     setFile(selectedFile);
     setExcelPreview(null);
     setDuplicateWarning("");
+    setUploadModalError("");
+    setUploadModalMessage("");
     setError("");
 
     if (!selectedFile) return;
@@ -1068,6 +1085,8 @@ function RagPanel({
         <ExcelPreviewDialog
           preview={excelPreview}
           duplicateWarning={duplicateWarning}
+          uploadError={uploadModalError}
+          uploadMessage={uploadModalMessage}
           loading={loading}
           onCancel={clearSelectedFile}
           onUpload={upload}
