@@ -1552,7 +1552,7 @@ function ChatPanel({
             Hapus Filter
           </button>
           <button className="button secondary" onClick={exportRagas} type="button">
-            Ekspor Evaluasi
+            Ekspor Data RAGAS
           </button>
         </div>
       </section>

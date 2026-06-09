@@ -122,19 +122,50 @@ function buildPairs(
 }
 
 function toExcelBuffer(rows: Array<Record<string, unknown>>) {
-  const worksheet = XLSX.utils.json_to_sheet(rows);
+  const worksheet = XLSX.utils.json_to_sheet(rows, {
+    header: ["id", "question", "answer", "context", "reference", "created_at"]
+  });
   worksheet["!cols"] = [
-    { wch: 46 },
-    { wch: 58 },
+    { wch: 10 },
+    { wch: 52 },
     { wch: 64 },
-    { wch: 38 },
-    { wch: 28 },
-    { wch: 22 },
-    { wch: 20 }
+    { wch: 100 },
+    { wch: 64 },
+    { wch: 24 }
   ];
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, "RAGAS Export");
   return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
+}
+
+function contextToExcel(value: unknown) {
+  if (value == null) return "[]";
+
+  if (typeof value === "string") {
+    try {
+      return contextToExcel(JSON.parse(value));
+    } catch {
+      return JSON.stringify([value]);
+    }
+  }
+
+  const source =
+    value && typeof value === "object" && !Array.isArray(value) && "retrieved_contexts" in value
+      ? (value as { retrieved_contexts?: unknown }).retrieved_contexts
+      : value;
+  const items = Array.isArray(source) ? source : [source];
+  const contexts = items
+    .map((item) => {
+      if (typeof item === "string") return item;
+      if (!item || typeof item !== "object") return String(item ?? "");
+
+      const record = item as Record<string, unknown>;
+      const pageContent = record.pageContent ?? record.page_content ?? record.content ?? record.text;
+      return typeof pageContent === "string" ? pageContent : JSON.stringify(record);
+    })
+    .filter(Boolean);
+
+  return JSON.stringify(contexts);
 }
 
 export async function GET(request: Request) {
@@ -153,6 +184,79 @@ export async function GET(request: Request) {
 
   try {
     const data = await withClient(async (client) => {
+      if (exportType === "ragas") {
+        const ragasInfo = await getColumns(client, "ragas_data");
+        const idColumn = pickColumn(ragasInfo.columns, ["id"]);
+        const questionColumn = pickColumn(ragasInfo.columns, ["question"]);
+        const answerColumn = pickColumn(ragasInfo.columns, ["answer"]);
+        const contextColumn = pickColumn(ragasInfo.columns, ["context"]);
+        const createdAtColumn = pickColumn(ragasInfo.columns, ["created_at", "createdAt", "timestamp"]);
+
+        if (!questionColumn || !answerColumn || !contextColumn) {
+          throw new Error("Tabel ragas_data harus memiliki kolom question, answer, dan context.");
+        }
+
+        const conditions: string[] = [];
+        const params: unknown[] = [];
+
+        if (createdAtColumn) {
+          params.push(filter.startSql, filter.endSql);
+          conditions.push(
+            `r.${quoteIdent(createdAtColumn)} >= $1::timestamp and r.${quoteIdent(createdAtColumn)} < $2::timestamp`
+          );
+        }
+
+        if (search) {
+          params.push(`%${search}%`);
+          const searchParam = `$${params.length}`;
+          conditions.push(
+            `(r.${quoteIdent(questionColumn)} ilike ${searchParam}::text
+              or r.${quoteIdent(answerColumn)} ilike ${searchParam}::text
+              or r.${quoteIdent(contextColumn)}::text ilike ${searchParam}::text)`
+          );
+        }
+
+        const result = await client.query<{
+          id?: string | number;
+          question: string;
+          answer: string;
+          context: unknown;
+          created_at?: string;
+        }>(
+          `
+            select
+              ${idColumn ? `r.${quoteIdent(idColumn)}::text` : "null"} as id,
+              r.${quoteIdent(questionColumn)}::text as question,
+              r.${quoteIdent(answerColumn)}::text as answer,
+              r.${quoteIdent(contextColumn)} as context,
+              ${createdAtColumn ? `r.${quoteIdent(createdAtColumn)}::text` : "null"} as created_at
+            from ${ragasInfo.table.sql} r
+            ${conditions.length ? `where ${conditions.join(" and ")}` : ""}
+            order by ${createdAtColumn ? `r.${quoteIdent(createdAtColumn)}` : idColumn ? `r.${quoteIdent(idColumn)}` : "1"} asc
+            limit 10000
+          `,
+          params
+        );
+
+        await writeAuditLog({
+          request,
+          userId: admin.id,
+          action: "export_ragas_data",
+          detail: { range: filter.range, search, total: result.rows.length }
+        });
+
+        return {
+          exportRows: result.rows.map((row) => ({
+            id: row.id ?? "",
+            question: row.question,
+            answer: row.answer,
+            context: contextToExcel(row.context),
+            reference: "",
+            created_at: row.created_at || ""
+          }))
+        };
+      }
+
       const info = await getColumns(client, "message");
       const sessionColumn = pickColumn(info.columns, ["session_id", "sessionId", "sesson_id", "id_session"]);
       const timeColumn = pickColumn(info.columns, ["created_at", "createdAt", "timestamp", "date", "time"]);
@@ -166,57 +270,6 @@ export async function GET(request: Request) {
         ? `m.${quoteIdent(timeColumn)} >= $1::timestamp and m.${quoteIdent(timeColumn)} < $2::timestamp`
         : "true";
       const timeParams = timeColumn && !includeAll ? [filter.startSql, filter.endSql] : [];
-
-      if (exportType === "ragas") {
-        const result = await client.query<{ session_id: string; created_at?: string; raw: Record<string, unknown> }>(
-          `
-            select
-              m.${quoteIdent(sessionColumn)}::text as session_id,
-              ${timeColumn ? `m.${quoteIdent(timeColumn)}::text` : "null"} as created_at,
-              ${rowsToJsonExpression("m", info.columns)} as raw
-            from ${info.table.sql} m
-            where ${timeCondition}
-            ${timeColumn ? `order by m.${quoteIdent(timeColumn)} asc` : idColumn ? `order by m.${quoteIdent(idColumn)} asc` : ""}
-            limit 10000
-          `,
-          timeParams
-        );
-        const messages = result.rows
-          .map((row) => ({
-            sessionId: row.session_id,
-            createdAt: row.created_at,
-            ...normalizeMessage(row.raw)
-          }))
-          .filter((item) => !isInternalAgentMessage(item.role, item.content));
-        const pairs = buildPairs(messages);
-        const filteredPairs = search
-          ? pairs.filter(
-              (pair) =>
-                pair.sessionId.toLowerCase().includes(search.toLowerCase()) ||
-                pair.question.toLowerCase().includes(search.toLowerCase()) ||
-                pair.answer.toLowerCase().includes(search.toLowerCase())
-            )
-          : pairs;
-
-        await writeAuditLog({
-          request,
-          userId: admin.id,
-          action: "export_ragas_chat",
-          detail: { range: filter.range, search, total: filteredPairs.length }
-        });
-
-        return {
-          exportRows: filteredPairs.map((pair) => ({
-            question: pair.question,
-            answer: pair.answer,
-            contexts: "",
-            ground_truth: "",
-            session_id: pair.sessionId,
-            created_at: pair.createdAt || "",
-            category: pair.category || ""
-          }))
-        };
-      }
 
       if (!session) {
         const sessionInfo = await getColumns(client, "chat_sessions");
@@ -352,7 +405,7 @@ export async function GET(request: Request) {
       return new NextResponse(new Uint8Array(excelBuffer), {
         headers: {
           "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "Content-Disposition": `attachment; filename="ragas-chat-export-${filter.range}.xlsx"`
+          "Content-Disposition": `attachment; filename="ragas-data-export-${filter.range}.xlsx"`
         }
       });
     }
