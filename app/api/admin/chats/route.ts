@@ -3,36 +3,19 @@ import { getCurrentAdmin } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { formatDbError, getColumns, pickColumn, quoteIdent, rowsToJsonExpression, withClient } from "@/lib/db";
 import { isInternalAgentMessage, looksLikeAnswer, looksLikeQuestion, normalizeMessage } from "@/lib/normalize";
+import {
+  addWibDays,
+  getCurrentWibWallClock,
+  parseWibDateOnly,
+  startOfWibDay,
+  toStoredSqlTimestamp
+} from "@/lib/report-time";
 import * as XLSX from "xlsx";
 
 type RangeName = "today" | "yesterday" | "this_week" | "last_week" | "this_month" | "last_month" | "custom";
 
-function pad(value: number) {
-  return String(value).padStart(2, "0");
-}
-
-function toSqlTimestamp(date: Date) {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
-    date.getMinutes()
-  )}:${pad(date.getSeconds())}`;
-}
-
-function startOfDay(date: Date) {
-  const next = new Date(date);
-  next.setHours(0, 0, 0, 0);
-  return next;
-}
-
 function addDays(date: Date, days: number) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
-function parseDateOnly(value: string | null) {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(year, month - 1, day);
+  return addWibDays(date, days);
 }
 
 function getFilter(searchParams: URLSearchParams) {
@@ -47,8 +30,8 @@ function getFilter(searchParams: URLSearchParams) {
     requestedRange === "custom"
       ? requestedRange
       : "this_week";
-  const now = new Date();
-  let start = startOfDay(now);
+  const now = getCurrentWibWallClock();
+  let start = startOfWibDay(now);
   let end = addDays(start, 1);
 
   if (range === "yesterday") {
@@ -57,7 +40,7 @@ function getFilter(searchParams: URLSearchParams) {
   }
 
   if (range === "this_week" || range === "last_week") {
-    const day = start.getDay();
+    const day = start.getUTCDay();
     const diffToMonday = day === 0 ? -6 : 1 - day;
     start = addDays(start, diffToMonday);
     end = addDays(start, 7);
@@ -68,26 +51,26 @@ function getFilter(searchParams: URLSearchParams) {
   }
 
   if (range === "this_month" || range === "last_month") {
-    start = new Date(now.getFullYear(), now.getMonth(), 1);
-    end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
     if (range === "last_month") {
       end = start;
-      start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
     }
   }
 
   if (range === "custom") {
-    const customStart = parseDateOnly(searchParams.get("startDate"));
-    const customEnd = parseDateOnly(searchParams.get("endDate"));
-    if (customStart) start = startOfDay(customStart);
-    if (customEnd) end = addDays(startOfDay(customEnd), 1);
+    const customStart = parseWibDateOnly(searchParams.get("startDate"));
+    const customEnd = parseWibDateOnly(searchParams.get("endDate"));
+    if (customStart) start = startOfWibDay(customStart);
+    if (customEnd) end = addDays(startOfWibDay(customEnd), 1);
     if (end <= start) end = addDays(start, 1);
   }
 
   return {
     range,
-    startSql: toSqlTimestamp(start),
-    endSql: toSqlTimestamp(end)
+    startSql: toStoredSqlTimestamp(start),
+    endSql: toStoredSqlTimestamp(end)
   };
 }
 

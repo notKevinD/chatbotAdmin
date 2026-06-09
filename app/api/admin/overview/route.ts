@@ -2,6 +2,15 @@ import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/auth";
 import { formatDbError, getColumns, pickColumn, quoteIdent, rowsToJsonExpression, withClient } from "@/lib/db";
 import { asText, isInternalAgentMessage, looksLikeAnswer, looksLikeQuestion, normalizeMessage } from "@/lib/normalize";
+import {
+  addWibDays,
+  formatWibDateOnly,
+  getCurrentWibWallClock,
+  parseStoredTimestampAsWib,
+  parseWibDateOnly,
+  startOfWibDay,
+  toStoredSqlTimestamp
+} from "@/lib/report-time";
 
 type RangeName = "today" | "yesterday" | "this_week" | "last_week" | "this_month" | "last_month" | "custom";
 type Granularity = "three_hour" | "day" | "week";
@@ -10,28 +19,8 @@ function pad(value: number) {
   return String(value).padStart(2, "0");
 }
 
-function toSqlTimestamp(date: Date) {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
-    date.getMinutes()
-  )}:${pad(date.getSeconds())}`;
-}
-
-function startOfDay(date: Date) {
-  const next = new Date(date);
-  next.setHours(0, 0, 0, 0);
-  return next;
-}
-
 function addDays(date: Date, days: number) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
-function parseDateOnly(value: string | null) {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(year, month - 1, day);
+  return addWibDays(date, days);
 }
 
 function getFilterFromUrl(url: string) {
@@ -47,8 +36,8 @@ function getFilterFromUrl(url: string) {
     requestedRange === "custom"
       ? requestedRange
       : "today";
-  const now = new Date();
-  let start = startOfDay(now);
+  const now = getCurrentWibWallClock();
+  let start = startOfWibDay(now);
   let end = addDays(start, 1);
 
   if (range === "yesterday") {
@@ -57,7 +46,7 @@ function getFilterFromUrl(url: string) {
   }
 
   if (range === "this_week" || range === "last_week") {
-    const day = start.getDay();
+    const day = start.getUTCDay();
     const diffToMonday = day === 0 ? -6 : 1 - day;
     start = addDays(start, diffToMonday);
     end = addDays(start, 7);
@@ -68,19 +57,19 @@ function getFilterFromUrl(url: string) {
   }
 
   if (range === "this_month" || range === "last_month") {
-    start = new Date(now.getFullYear(), now.getMonth(), 1);
-    end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
     if (range === "last_month") {
       end = start;
-      start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
     }
   }
 
   if (range === "custom") {
-    const customStart = parseDateOnly(searchParams.get("startDate"));
-    const customEnd = parseDateOnly(searchParams.get("endDate"));
-    if (customStart) start = startOfDay(customStart);
-    if (customEnd) end = addDays(startOfDay(customEnd), 1);
+    const customStart = parseWibDateOnly(searchParams.get("startDate"));
+    const customEnd = parseWibDateOnly(searchParams.get("endDate"));
+    if (customStart) start = startOfWibDay(customStart);
+    if (customEnd) end = addDays(startOfWibDay(customEnd), 1);
     if (end <= start) end = addDays(start, 1);
   }
 
@@ -98,28 +87,13 @@ function getFilterFromUrl(url: string) {
     start,
     end,
     granularity,
-    startSql: toSqlTimestamp(start),
-    endSql: toSqlTimestamp(end)
+    startSql: toStoredSqlTimestamp(start),
+    endSql: toStoredSqlTimestamp(end)
   };
 }
 
 function parseStoredTimestamp(value: unknown) {
-  const text = asText(value);
-  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?/);
-
-  if (!match) return null;
-
-  const [, year, month, day, hour, minute, second = "0"] = match;
-  return new Date(
-    Date.UTC(
-      Number(year),
-      Number(month) - 1,
-      Number(day),
-      Number(hour) - 1,
-      Number(minute),
-      Number(second)
-    )
-  );
+  return parseStoredTimestampAsWib(asText(value));
 }
 
 function formatSeriesLabel(date: Date, granularity: Granularity) {
@@ -138,8 +112,8 @@ function formatHourRangeLabel(date: Date) {
 }
 
 function formatWeekLabel(index: number, start: Date, end: Date) {
-  const startDay = pad(start.getDate());
-  const endDay = pad(addDays(end, -1).getDate());
+  const startDay = pad(start.getUTCDate());
+  const endDay = pad(addDays(end, -1).getUTCDate());
   return `Minggu ${index} (${startDay}-${endDay})`;
 }
 
@@ -170,35 +144,40 @@ function buildQuestionSeries(
 
   const buckets: Array<{ key: string; label: string; count: number }> = [];
   const cursor = new Date(start);
-  const origin = new Date(Date.UTC(start.getFullYear(), start.getMonth(), start.getDate()));
+  const origin = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
   while (cursor < end && buckets.length < 370) {
     const bucketStart = new Date(cursor);
     let bucketEnd = new Date(cursor);
 
-    if (granularity === "three_hour") bucketEnd.setHours(bucketEnd.getHours() + 3);
-    else if (granularity === "week") bucketEnd.setDate(bucketEnd.getDate() + 7);
-    else bucketEnd.setDate(bucketEnd.getDate() + 1);
+    if (granularity === "three_hour") bucketEnd.setUTCHours(bucketEnd.getUTCHours() + 3);
+    else if (granularity === "week") bucketEnd.setUTCDate(bucketEnd.getUTCDate() + 7);
+    else bucketEnd.setUTCDate(bucketEnd.getUTCDate() + 1);
 
     if (bucketEnd > end) bucketEnd = new Date(end);
 
     buckets.push({
       key: getBucketKey(
-        new Date(Date.UTC(cursor.getFullYear(), cursor.getMonth(), cursor.getDate(), cursor.getHours())),
+        new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), cursor.getUTCDate(), cursor.getUTCHours())),
         granularity,
         origin
       ),
       label:
         granularity === "three_hour"
-          ? formatHourRangeLabel(new Date(Date.UTC(cursor.getFullYear(), cursor.getMonth(), cursor.getDate(), cursor.getHours())))
+          ? formatHourRangeLabel(
+              new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), cursor.getUTCDate(), cursor.getUTCHours()))
+            )
           : granularity === "week"
             ? formatWeekLabel(buckets.length + 1, bucketStart, bucketEnd)
-            : formatSeriesLabel(new Date(Date.UTC(cursor.getFullYear(), cursor.getMonth(), cursor.getDate())), granularity),
+            : formatSeriesLabel(
+                new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), cursor.getUTCDate())),
+                granularity
+              ),
       count: 0
     });
 
-    if (granularity === "three_hour") cursor.setHours(cursor.getHours() + 3);
-    else if (granularity === "week") cursor.setDate(cursor.getDate() + 7);
-    else cursor.setDate(cursor.getDate() + 1);
+    if (granularity === "three_hour") cursor.setUTCHours(cursor.getUTCHours() + 3);
+    else if (granularity === "week") cursor.setUTCDate(cursor.getUTCDate() + 7);
+    else cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
 
   const bucketMap = new Map(buckets.map((bucket) => [bucket.key, bucket]));
@@ -289,8 +268,8 @@ export async function GET(request: Request) {
       return {
         range: filter.range,
         filter: {
-          startDate: filter.startSql.slice(0, 10),
-          endDate: toSqlTimestamp(addDays(filter.end, -1)).slice(0, 10),
+          startDate: formatWibDateOnly(filter.start),
+          endDate: formatWibDateOnly(addDays(filter.end, -1)),
           granularity: filter.granularity
         },
         stats: {
