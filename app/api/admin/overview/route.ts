@@ -259,7 +259,12 @@ export async function GET(request: Request) {
       const questionSeries = buildQuestionSeries(questions, messageTime, filter.start, filter.end, filter.granularity);
       const unansweredPattern =
         /tidak tahu|tidak bisa|tidak tercantum|tidak tersedia|tidak ditemukan|tidak memiliki data|data .* tidak ada|belum tersedia|belum menemukan|not found|i don't know|mohon maaf/i;
-      const unansweredPairs: Array<{ question: string; answer: string }> = [];
+      const unansweredPairs: Array<{
+        sessionId: string;
+        question: string;
+        answer: string;
+        createdAt?: string;
+      }> = [];
       const pendingQuestions = new Map<string, string>();
 
       for (const item of normalized.reverse()) {
@@ -271,8 +276,10 @@ export async function GET(request: Request) {
           const question = pendingQuestions.get(sessionId) || "";
           if (unansweredPattern.test(item.content)) {
             unansweredPairs.push({
+              sessionId,
               question,
-              answer: item.content
+              answer: item.content,
+              createdAt: messageTime ? asText(item.raw[messageTime]) : undefined
             });
           }
           pendingQuestions.delete(sessionId);
@@ -292,7 +299,7 @@ export async function GET(request: Request) {
           unanswered: unansweredPairs.length
         },
         questionSeries,
-        unansweredSamples: unansweredPairs.slice(0, 5)
+        unansweredSamples: unansweredPairs
       };
     });
 

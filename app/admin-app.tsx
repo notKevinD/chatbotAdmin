@@ -14,7 +14,14 @@ type Overview = {
     unanswered: number;
   };
   questionSeries: Array<{ label: string; count: number }>;
-  unansweredSamples: Array<{ question: string; answer: string }>;
+  unansweredSamples: UnansweredItem[];
+};
+
+type UnansweredItem = {
+  sessionId: string;
+  question: string;
+  answer: string;
+  createdAt?: string;
 };
 
 type DocumentRow = {
@@ -49,6 +56,7 @@ type ChatSession = {
 };
 
 type ChatPair = {
+  sessionId?: string;
   question: string;
   answer: string;
   category?: string;
@@ -87,6 +95,7 @@ type DuplicateCheckResponse = {
 };
 
 const PAGE_SIZE = 10;
+const UNANSWERED_PAGE_SIZE = 5;
 
 const rangeLabel: Record<Range, string> = {
   today: "Hari Ini",
@@ -473,6 +482,44 @@ export default function AdminApp() {
 
 function Dashboard({ overview, range }: { overview: Overview | null; range: Range }) {
   const stats = overview?.stats || { users: 0, chats: 0, unanswered: 0 };
+  const unansweredItems = overview?.unansweredSamples || [];
+  const [unansweredPage, setUnansweredPage] = useState(1);
+  const [selectedUnanswered, setSelectedUnanswered] = useState<UnansweredItem | null>(null);
+  const [sessionPairs, setSessionPairs] = useState<ChatPair[]>([]);
+  const [sessionLoading, setSessionLoading] = useState(false);
+  const [sessionError, setSessionError] = useState("");
+  const totalPages = Math.max(Math.ceil(unansweredItems.length / UNANSWERED_PAGE_SIZE), 1);
+  const visibleUnanswered = unansweredItems.slice(
+    (unansweredPage - 1) * UNANSWERED_PAGE_SIZE,
+    unansweredPage * UNANSWERED_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setUnansweredPage(1);
+    setSelectedUnanswered(null);
+    setSessionPairs([]);
+    setSessionError("");
+  }, [overview]);
+
+  async function openSession(item: UnansweredItem) {
+    setSelectedUnanswered(item);
+    setSessionPairs([]);
+    setSessionError("");
+    setSessionLoading(true);
+
+    try {
+      const params = new URLSearchParams({
+        session: item.sessionId,
+        all: "true"
+      });
+      const data = await fetchJson<{ pairs: ChatPair[] }>(`/api/admin/chats?${params.toString()}`);
+      setSessionPairs(data.pairs || []);
+    } catch (err) {
+      setSessionError(err instanceof Error ? err.message : "Gagal memuat seluruh percakapan.");
+    } finally {
+      setSessionLoading(false);
+    }
+  }
 
   return (
     <div className="grid">
@@ -488,24 +535,107 @@ function Dashboard({ overview, range }: { overview: Overview | null; range: Rang
         <div className="panel-head">
           <h2>Pertanyaan yang Belum Terjawab</h2>
         </div>
-        {(overview?.unansweredSamples || []).length ? (
-          <ul className="top-list">
-            {overview?.unansweredSamples.map((item, index) => (
+        {unansweredItems.length ? (
+          <>
+          <ul className="top-list unanswered-list">
+            {visibleUnanswered.map((item, index) => (
               <li key={`${item.question}-${index}`}>
-                <span>
+                <button className="unanswered-item" onClick={() => openSession(item)} type="button">
+                  <span>
                   <strong>Q:</strong> {item.question}
                   <br />
                   <span className="muted">
                     <strong>A:</strong> {item.answer}
                   </span>
-                </span>
+                  </span>
+                  <span className="unanswered-action">Lihat percakapan</span>
+                </button>
               </li>
             ))}
           </ul>
+          <PaginationControls
+            pagination={{
+              page: unansweredPage,
+              limit: UNANSWERED_PAGE_SIZE,
+              total: unansweredItems.length,
+              totalPages
+            }}
+            onPageChange={setUnansweredPage}
+          />
+          </>
         ) : (
           <div className="empty">Belum ada sampel jawaban bermasalah.</div>
         )}
       </section>
+
+      {selectedUnanswered ? (
+        <SessionConversationDialog
+          item={selectedUnanswered}
+          pairs={sessionPairs}
+          loading={sessionLoading}
+          error={sessionError}
+          onClose={() => {
+            setSelectedUnanswered(null);
+            setSessionPairs([]);
+            setSessionError("");
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function SessionConversationDialog({
+  item,
+  pairs,
+  loading,
+  error,
+  onClose
+}: {
+  item: UnansweredItem;
+  pairs: ChatPair[];
+  loading: boolean;
+  error: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <div aria-modal="true" className="detail-dialog session-dialog" role="dialog">
+        <div className="detail-head">
+          <div>
+            <span className="eyebrow">Riwayat Session</span>
+            <h3>{item.sessionId}</h3>
+            <p className="muted">
+              Pertanyaan bermasalah: {item.question}
+            </p>
+          </div>
+          <button aria-label="Tutup riwayat session" className="alert-close" onClick={onClose} type="button">
+            x
+          </button>
+        </div>
+
+        {loading ? <LoadingNotice text="Memuat seluruh percakapan session..." /> : null}
+        {error ? <div className="alert error">{error}</div> : null}
+
+        {!loading && !error ? (
+          <div className="conversation-list session-conversation-list">
+            {pairs.map((pair, index) => (
+              <article className="conversation-card" key={`${pair.createdAt || "chat"}-${index}`}>
+                <div className="conversation-time">{formatIndonesianDateTime(pair.createdAt)}</div>
+                <div className="bubble user-bubble">
+                  <span>Question from user</span>
+                  <p>{pair.question || "-"}</p>
+                </div>
+                <div className="bubble bot-bubble">
+                  <span>Answer from bot</span>
+                  <p>{pair.answer || "-"}</p>
+                </div>
+              </article>
+            ))}
+            {!pairs.length ? <div className="empty">Tidak ada percakapan pada session ini.</div> : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -929,14 +1059,15 @@ function RagPanel({
     form.set("mode", mode);
 
     try {
-      await fetchJson("/api/admin/rag-upload", {
+      const result = await fetchJson<{ documentCount?: number }>("/api/admin/rag-upload", {
         method: "POST",
         body: form
       });
+      const storedCount = result.documentCount || 0;
       const successMessage =
         mode === "overwrite"
-          ? "Data lama ditimpa, file berhasil dikirim untuk diproses, dan catatan file diperbarui."
-          : "File berhasil dikirim untuk diproses dan catatan file dicatat.";
+          ? `Data lama berhasil ditimpa dan ${storedCount.toLocaleString("id-ID")} data baru terverifikasi di database.`
+          : `${storedCount.toLocaleString("id-ID")} data berhasil diproses dan terverifikasi di database.`;
       setUploadModalMessage(successMessage);
       setMessage(successMessage);
       clearSelectedFile();

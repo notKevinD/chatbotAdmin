@@ -161,6 +161,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const session = url.searchParams.get("session");
   const exportType = url.searchParams.get("export");
+  const includeAll = url.searchParams.get("all") === "true";
   const search = (url.searchParams.get("q") || "").trim();
   const filter = getFilter(url.searchParams);
   const page = Math.max(Number(url.searchParams.get("page") || "1"), 1);
@@ -178,10 +179,10 @@ export async function GET(request: Request) {
         throw new Error("Kolom session id tidak ditemukan di tabel message.");
       }
 
-      const timeCondition = timeColumn
+      const timeCondition = timeColumn && !includeAll
         ? `m.${quoteIdent(timeColumn)} >= $1::timestamp and m.${quoteIdent(timeColumn)} < $2::timestamp`
         : "true";
-      const timeParams = timeColumn ? [filter.startSql, filter.endSql] : [];
+      const timeParams = timeColumn && !includeAll ? [filter.startSql, filter.endSql] : [];
 
       if (exportType === "ragas") {
         const result = await client.query<{ session_id: string; created_at?: string; raw: Record<string, unknown> }>(
@@ -325,7 +326,7 @@ export async function GET(request: Request) {
           where m.${quoteIdent(sessionColumn)}::text = $${timeParams.length + 1}
             and ${timeCondition}
           ${timeColumn ? `order by m.${quoteIdent(timeColumn)} asc` : idColumn ? `order by m.${quoteIdent(idColumn)} asc` : ""}
-          limit 1500
+          limit ${includeAll ? "10000" : "1500"}
         `,
         [...timeParams, session]
       );
@@ -348,17 +349,17 @@ export async function GET(request: Request) {
           )
         : pairs;
       const total = filteredPairs.length;
-      const paginatedPairs = filteredPairs.slice(offset, offset + limit);
+      const paginatedPairs = includeAll ? filteredPairs : filteredPairs.slice(offset, offset + limit);
 
       return {
         session,
         messages,
         pairs: paginatedPairs,
         pagination: {
-          page,
-          limit,
+          page: includeAll ? 1 : page,
+          limit: includeAll ? Math.max(total, 1) : limit,
           total,
-          totalPages: Math.max(Math.ceil(total / limit), 1)
+          totalPages: includeAll ? 1 : Math.max(Math.ceil(total / limit), 1)
         }
       };
     });

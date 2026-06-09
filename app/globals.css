@@ -778,6 +778,58 @@ button {
   border-bottom: 0;
 }
 
+.unanswered-list {
+  gap: 0;
+}
+
+.unanswered-item {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 4px 0;
+  text-align: left;
+  width: 100%;
+}
+
+.unanswered-item:hover .unanswered-action {
+  background: rgba(14, 165, 183, 0.12);
+  border-color: rgba(14, 165, 183, 0.4);
+  color: var(--brand-strong);
+}
+
+.unanswered-action {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+
+.session-dialog {
+  max-width: 1080px;
+  overflow: hidden;
+}
+
+.session-dialog .detail-head {
+  min-width: 0;
+}
+
+.session-dialog .detail-head h3 {
+  overflow-wrap: anywhere;
+}
+
+.session-conversation-list {
+  max-height: calc(86vh - 190px);
+  overflow-y: auto;
+  padding: 0 4px 4px 0;
+}
+
 .badge {
   background: var(--soft);
   border: 1px solid rgba(14, 165, 183, 0.2);

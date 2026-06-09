@@ -92,6 +92,45 @@ async function checkDuplicateFileName(fileName: string) {
   });
 }
 
+async function countDocumentsBySource(fileName: string) {
+  const { base: fileBaseName } = splitFileName(fileName);
+
+  return withClient(async (client) => {
+    const info = await getColumns(client, "documents");
+    const metadataColumn = pickColumn(info.columns, ["metadata"]);
+    const metadataSourceColumn = pickColumn(info.columns, ["metadata_source", "metadataSource"]);
+    const conditions: string[] = [];
+
+    if (metadataSourceColumn) {
+      conditions.push(
+        `lower(${quoteIdent(metadataSourceColumn)}::text) in (lower($1::text), lower($2::text))`
+      );
+    }
+
+    if (metadataColumn) {
+      const metadata = quoteIdent(metadataColumn);
+      conditions.push(`lower(${metadata}->>'source') in (lower($1::text), lower($2::text))`);
+      conditions.push(`lower(${metadata}#>>'{source,source}') in (lower($1::text), lower($2::text))`);
+      conditions.push(`lower(${metadata}->>'metadata_name') in (lower($1::text), lower($2::text))`);
+      conditions.push(`lower(${metadata}->>'metadataName') in (lower($1::text), lower($2::text))`);
+      conditions.push(`lower(${metadata}->>'fileName') in (lower($1::text), lower($2::text))`);
+    }
+
+    if (!conditions.length) return 0;
+
+    const result = await client.query<{ count: number }>(
+      `
+        select count(*)::int as count
+        from ${info.table.sql}
+        where ${conditions.join("\n           or ")}
+      `,
+      [fileName, fileBaseName]
+    );
+
+    return result.rows[0]?.count || 0;
+  });
+}
+
 export async function GET(request: Request) {
   if (!(await isAuthenticated())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -218,15 +257,50 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Webhook n8n gagal memproses upload.", detail: text }, { status: 502 });
     }
 
+    const documentCount = await countDocumentsBySource(uploadFileName);
+
+    if (documentCount < 1) {
+      const verificationError =
+        "Webhook n8n merespons berhasil, tetapi tidak ada data baru yang ditemukan di tabel documents. Periksa node chunking, embedding, dan PGVector Store.";
+      await upsertMetadataStatus(uploadFileName, "failed", verificationError);
+      await writeAuditLog({
+        request,
+        userId: admin.id,
+        action: "upload_rag_verification_failed",
+        detail: {
+          fileName,
+          uploadFileName,
+          mode,
+          duplicate,
+          webhookStatus: response.status,
+          webhookResponse: text.slice(0, 1000)
+        }
+      });
+      return NextResponse.json(
+        {
+          error: verificationError,
+          detail: text
+        },
+        { status: 502 }
+      );
+    }
+
     await upsertMetadataStatus(uploadFileName, "success");
     await writeAuditLog({
       request,
       userId: admin.id,
       action: mode === "overwrite" ? "overwrite_rag_upload" : "upload_rag_success",
-      detail: { fileName, uploadFileName, mode, duplicate }
+      detail: { fileName, uploadFileName, mode, duplicate, documentCount }
     });
 
-    return NextResponse.json({ ok: true, duplicate, mode, metadataName: uploadFileName, response: text });
+    return NextResponse.json({
+      ok: true,
+      duplicate,
+      mode,
+      metadataName: uploadFileName,
+      documentCount,
+      response: text
+    });
   } catch (error) {
     if (typeof uploadFileName === "string") {
       await upsertMetadataStatus(uploadFileName, "failed", formatDbError(error, "Upload gagal.")).catch(() => undefined);
