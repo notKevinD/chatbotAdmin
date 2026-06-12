@@ -406,11 +406,14 @@ lib/auth.ts                       Helper autentikasi
 
 ## Evaluasi RAGAS
 
+Tombol **Ekspor Data RAGAS** pada halaman Chat membaca data langsung dari tabel
+`chat_history` sesuai periode dan kata pencarian yang aktif. File Excel berisi
+`session_id`, `question`, `answer`, `context`, waktu respons, serta kolom
+`reference` kosong yang dapat diisi manual sebagai jawaban acuan.
+
 Script evaluasi tersedia di `scripts/run_ragas_evaluation.py`. File Excel input
 harus memiliki kolom `question`, `answer`, dan `context`. Kolom `reference`
-bersifat opsional dan dapat diisi manual sebagai jawaban acuan. Kolom
-`response_time_ms` juga opsional untuk membawa waktu respons chatbot yang
-dicatat oleh workflow n8n.
+bersifat opsional.
 
 Persiapan di Windows PowerShell:
 
@@ -439,20 +442,5 @@ Tanpa `reference`, script menghitung `faithfulness`, `answer_relevancy`, dan
 
 Hasil juga memiliki `evaluation_time_seconds`, yaitu lama proses evaluasi RAGAS
 untuk setiap baris. Nilai ini berbeda dari `response_time_ms`, karena
-`response_time_ms` adalah lama chatbot menghasilkan jawaban saat digunakan
-oleh pengguna.
-
-Tambahkan kolom waktu respons ke PostgreSQL:
-
-```sql
-alter table public.ragas_data
-add column if not exists response_time_ms integer
-check (response_time_ms is null or response_time_ms >= 0);
-```
-
-Di n8n, simpan `Date.now()` sebelum AI Agent sebagai `started_at_ms`. Setelah
-AI Agent selesai, isi `response_time_ms` dengan:
-
-```text
-{{ Date.now() - $('Set Start Time').item.json.started_at_ms }}
-```
+`response_time_ms` dihitung otomatis dari selisih `time_end` dan `time_start`
+pada tabel `chat_history`.

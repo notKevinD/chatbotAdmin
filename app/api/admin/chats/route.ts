@@ -77,6 +77,7 @@ function toExcelBuffer(rows: Array<Record<string, unknown>>) {
   const worksheet = XLSX.utils.json_to_sheet(rows, {
     header: [
       "id",
+      "session_id",
       "question",
       "answer",
       "context",
@@ -87,6 +88,7 @@ function toExcelBuffer(rows: Array<Record<string, unknown>>) {
   });
   worksheet["!cols"] = [
     { wch: 10 },
+    { wch: 38 },
     { wch: 52 },
     { wch: 64 },
     { wch: 100 },
@@ -146,29 +148,28 @@ export async function GET(request: Request) {
   try {
     const data = await withClient(async (client) => {
       if (exportType === "ragas") {
-        const ragasInfo = await getColumns(client, "ragas_data");
-        const idColumn = pickColumn(ragasInfo.columns, ["id"]);
-        const questionColumn = pickColumn(ragasInfo.columns, ["question"]);
-        const answerColumn = pickColumn(ragasInfo.columns, ["answer"]);
-        const contextColumn = pickColumn(ragasInfo.columns, ["context"]);
-        const createdAtColumn = pickColumn(ragasInfo.columns, ["created_at", "createdAt", "timestamp"]);
-        const responseTimeColumn = pickColumn(ragasInfo.columns, [
-          "response_time_ms",
-          "responseTimeMs",
-          "response_time"
-        ]);
+        const historyInfo = await getColumns(client, "chat_history");
+        const idColumn = pickColumn(historyInfo.columns, ["id"]);
+        const sessionColumn = pickColumn(historyInfo.columns, ["session_id", "sessionId"]);
+        const questionColumn = pickColumn(historyInfo.columns, ["question"]);
+        const answerColumn = pickColumn(historyInfo.columns, ["answer"]);
+        const contextColumn = pickColumn(historyInfo.columns, ["context"]);
+        const timeStartColumn = pickColumn(historyInfo.columns, ["time_start", "started_at", "created_at"]);
+        const timeEndColumn = pickColumn(historyInfo.columns, ["time_end", "ended_at", "completed_at"]);
 
-        if (!questionColumn || !answerColumn || !contextColumn) {
-          throw new Error("Tabel ragas_data harus memiliki kolom question, answer, dan context.");
+        if (!sessionColumn || !questionColumn || !answerColumn || !contextColumn) {
+          throw new Error(
+            "Tabel chat_history harus memiliki kolom session_id, question, answer, dan context."
+          );
         }
 
         const conditions: string[] = [];
         const params: unknown[] = [];
 
-        if (createdAtColumn) {
+        if (timeStartColumn) {
           params.push(filter.startSql, filter.endSql);
           conditions.push(
-            `r.${quoteIdent(createdAtColumn)} >= $1::timestamp and r.${quoteIdent(createdAtColumn)} < $2::timestamp`
+            `h.${quoteIdent(timeStartColumn)} >= $1::timestamp and h.${quoteIdent(timeStartColumn)} < $2::timestamp`
           );
         }
 
@@ -176,14 +177,23 @@ export async function GET(request: Request) {
           params.push(`%${search}%`);
           const searchParam = `$${params.length}`;
           conditions.push(
-            `(r.${quoteIdent(questionColumn)} ilike ${searchParam}::text
-              or r.${quoteIdent(answerColumn)} ilike ${searchParam}::text
-              or r.${quoteIdent(contextColumn)}::text ilike ${searchParam}::text)`
+            `(h.${quoteIdent(sessionColumn)}::text ilike ${searchParam}::text
+              or h.${quoteIdent(questionColumn)} ilike ${searchParam}::text
+              or h.${quoteIdent(answerColumn)} ilike ${searchParam}::text
+              or h.${quoteIdent(contextColumn)}::text ilike ${searchParam}::text)`
           );
         }
 
+        const responseTimeExpression =
+          timeStartColumn && timeEndColumn
+            ? `greatest(
+                round(extract(epoch from (h.${quoteIdent(timeEndColumn)} - h.${quoteIdent(timeStartColumn)})) * 1000)::bigint,
+                0
+              )`
+            : "null";
         const result = await client.query<{
           id?: string | number;
+          session_id: string;
           question: string;
           answer: string;
           context: unknown;
@@ -192,15 +202,16 @@ export async function GET(request: Request) {
         }>(
           `
             select
-              ${idColumn ? `r.${quoteIdent(idColumn)}::text` : "null"} as id,
-              r.${quoteIdent(questionColumn)}::text as question,
-              r.${quoteIdent(answerColumn)}::text as answer,
-              r.${quoteIdent(contextColumn)} as context,
-              ${responseTimeColumn ? `r.${quoteIdent(responseTimeColumn)}::integer` : "null"} as response_time_ms,
-              ${createdAtColumn ? `r.${quoteIdent(createdAtColumn)}::text` : "null"} as created_at
-            from ${ragasInfo.table.sql} r
+              ${idColumn ? `h.${quoteIdent(idColumn)}::text` : "null"} as id,
+              h.${quoteIdent(sessionColumn)}::text as session_id,
+              h.${quoteIdent(questionColumn)}::text as question,
+              h.${quoteIdent(answerColumn)}::text as answer,
+              h.${quoteIdent(contextColumn)} as context,
+              ${responseTimeExpression} as response_time_ms,
+              ${timeStartColumn ? `h.${quoteIdent(timeStartColumn)}::text` : "null"} as created_at
+            from ${historyInfo.table.sql} h
             ${conditions.length ? `where ${conditions.join(" and ")}` : ""}
-            order by ${createdAtColumn ? `r.${quoteIdent(createdAtColumn)}` : idColumn ? `r.${quoteIdent(idColumn)}` : "1"} asc
+            order by ${timeStartColumn ? `h.${quoteIdent(timeStartColumn)}` : idColumn ? `h.${quoteIdent(idColumn)}` : "1"} asc
             limit 10000
           `,
           params
@@ -209,13 +220,14 @@ export async function GET(request: Request) {
         await writeAuditLog({
           request,
           userId: admin.id,
-          action: "export_ragas_data",
+          action: "export_chat_history_ragas",
           detail: { range: filter.range, search, total: result.rows.length }
         });
 
         return {
           exportRows: result.rows.map((row) => ({
             id: row.id ?? "",
+            session_id: row.session_id,
             question: row.question,
             answer: row.answer,
             context: contextToExcel(row.context),
