@@ -56,10 +56,12 @@ type ChatSession = {
 };
 
 type ChatPair = {
+  id?: string;
   sessionId?: string;
   question: string;
   answer: string;
-  category?: string;
+  context?: unknown;
+  responseTimeMs?: number | string | null;
   createdAt?: string;
 };
 
@@ -149,6 +151,40 @@ function formatIndonesianDateTime(value?: string) {
   } ${wibDate.getUTCFullYear()} pukul ${twoDigit(wibDate.getUTCHours())}.${twoDigit(
     wibDate.getUTCMinutes()
   )}`;
+}
+
+function getContextItems(value: unknown) {
+  let parsed = value;
+
+  if (typeof parsed === "string") {
+    const text = parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return text.trim() ? [{ content: text.trim(), metadata: null }] : [];
+    }
+  }
+
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const record = parsed as Record<string, unknown>;
+    parsed = record.retrieved_contexts ?? record.contexts ?? record.context ?? [record];
+  }
+
+  const items = Array.isArray(parsed) ? parsed : parsed == null ? [] : [parsed];
+
+  return items
+    .map((item) => {
+      if (typeof item === "string") return { content: item, metadata: null };
+      if (!item || typeof item !== "object") return { content: String(item ?? ""), metadata: null };
+
+      const record = item as Record<string, unknown>;
+      const content = record.pageContent ?? record.page_content ?? record.content ?? record.text;
+      return {
+        content: typeof content === "string" ? content : JSON.stringify(record, null, 2),
+        metadata: record.metadata ?? null
+      };
+    })
+    .filter((item) => item.content.trim());
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -598,6 +634,8 @@ function SessionConversationDialog({
   error: string;
   onClose: () => void;
 }) {
+  const [contextPair, setContextPair] = useState<ChatPair | null>(null);
+
   return (
     <div className="modal-backdrop" role="presentation">
       <div aria-modal="true" className="detail-dialog session-dialog" role="dialog">
@@ -621,7 +659,9 @@ function SessionConversationDialog({
           <div className="conversation-list session-conversation-list">
             {pairs.map((pair, index) => (
               <article className="conversation-card" key={`${pair.createdAt || "chat"}-${index}`}>
-                <div className="conversation-time">{formatIndonesianDateTime(pair.createdAt)}</div>
+                <div className="conversation-meta-line">
+                  <div className="conversation-time">{formatIndonesianDateTime(pair.createdAt)}</div>
+                </div>
                 <div className="bubble user-bubble">
                   <span>Question from user</span>
                   <p>{pair.question || "-"}</p>
@@ -630,11 +670,58 @@ function SessionConversationDialog({
                   <span>Answer from bot</span>
                   <p>{pair.answer || "-"}</p>
                 </div>
+                <div className="conversation-actions">
+                  {pair.responseTimeMs != null ? (
+                    <span className="muted">Waktu respons: {Number(pair.responseTimeMs).toLocaleString("id-ID")} ms</span>
+                  ) : null}
+                  {getContextItems(pair.context).length ? (
+                    <button className="button secondary compact-button" onClick={() => setContextPair(pair)} type="button">
+                      Lihat Context
+                    </button>
+                  ) : null}
+                </div>
               </article>
             ))}
             {!pairs.length ? <div className="empty">Tidak ada percakapan pada session ini.</div> : null}
           </div>
         ) : null}
+        {contextPair ? <ContextDetailDialog pair={contextPair} onClose={() => setContextPair(null)} /> : null}
+      </div>
+    </div>
+  );
+}
+
+function ContextDetailDialog({ pair, onClose }: { pair: ChatPair; onClose: () => void }) {
+  const contexts = getContextItems(pair.context);
+
+  return (
+    <div className="modal-backdrop nested-modal" role="presentation">
+      <div aria-modal="true" className="detail-dialog context-dialog" role="dialog">
+        <div className="detail-head">
+          <div>
+            <span className="eyebrow">Retrieval Context</span>
+            <h3>Context yang digunakan chatbot</h3>
+            <p className="muted">{contexts.length} context ditemukan.</p>
+          </div>
+          <button aria-label="Tutup detail context" className="alert-close" onClick={onClose} type="button">
+            x
+          </button>
+        </div>
+        <div className="context-list">
+          {contexts.map((context, index) => (
+            <article className="context-card" key={`${pair.id || "context"}-${index}`}>
+              <div className="context-number">Context {index + 1}</div>
+              <pre>{context.content}</pre>
+              {context.metadata != null ? (
+                <details>
+                  <summary>Metadata sumber</summary>
+                  <pre>{JSON.stringify(context.metadata, null, 2)}</pre>
+                </details>
+              ) : null}
+            </article>
+          ))}
+          {!contexts.length ? <div className="empty">Context tidak tersedia.</div> : null}
+        </div>
       </div>
     </div>
   );
@@ -1465,6 +1552,8 @@ function ChatPanel({
   loadSessions: (page?: number) => Promise<void>;
   onSelect: (sessionId: string, page?: number) => void;
 }) {
+  const [contextPair, setContextPair] = useState<ChatPair | null>(null);
+
   function exportRagas() {
     const params = new URLSearchParams({ export: "ragas", range });
     if (search.trim()) params.set("q", search.trim());
@@ -1590,7 +1679,6 @@ function ChatPanel({
             <article className="conversation-card" key={`${pair.createdAt}-${index}`}>
               <div className="conversation-meta-line">
                 <div className="conversation-time">{formatIndonesianDateTime(pair.createdAt)}</div>
-                {pair.category ? <span className="category-badge">{pair.category}</span> : null}
               </div>
               <div className="bubble user-bubble">
                 <span>Question from user</span>
@@ -1599,6 +1687,16 @@ function ChatPanel({
               <div className="bubble bot-bubble">
                 <span>Answer from bot</span>
                 <p>{pair.answer || "-"}</p>
+              </div>
+              <div className="conversation-actions">
+                {pair.responseTimeMs != null ? (
+                  <span className="muted">Waktu respons: {Number(pair.responseTimeMs).toLocaleString("id-ID")} ms</span>
+                ) : null}
+                {getContextItems(pair.context).length ? (
+                  <button className="button secondary compact-button" onClick={() => setContextPair(pair)} type="button">
+                    Lihat Context
+                  </button>
+                ) : null}
               </div>
             </article>
           ))}
@@ -1611,6 +1709,7 @@ function ChatPanel({
           onPageChange={(page) => selectedSession && onSelect(selectedSession, page)}
         />
       </section>
+      {contextPair ? <ContextDetailDialog pair={contextPair} onClose={() => setContextPair(null)} /> : null}
     </div>
   );
 }

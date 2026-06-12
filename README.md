@@ -152,9 +152,11 @@ Embedding tidak ditampilkan penuh karena ukurannya panjang dan tidak nyaman diba
 
 ### Riwayat Chat
 
-Session pengguna dibaca dari `chat_sessions`.
+Daftar session, isi percakapan, dan retrieval context dibaca dari tabel
+`chat_history`, dengan pengelompokan berdasarkan `session_id`.
 
-Isi percakapan dibaca dari tabel `message`, dengan pengelompokan berdasarkan `session_id`.
+Tabel `message` tetap dapat digunakan oleh Postgres Chat Memory n8n, tetapi
+tidak lagi menjadi sumber tampilan riwayat pada panel admin.
 
 Yang dihitung sebagai jumlah chat di dashboard adalah jumlah pertanyaan user, bukan jumlah semua message. Ini dibuat agar metrik lebih masuk akal untuk penggunaan chatbot.
 
@@ -224,6 +226,18 @@ chat_sessions (
 )
 ```
 
+```sql
+chat_history (
+  id bigint primary key,
+  question text not null,
+  answer text not null,
+  context jsonb not null default '[]'::jsonb,
+  time_start timestamp,
+  time_end timestamp,
+  session_id varchar(255) not null
+)
+```
+
 Kolom tambahan yang direkomendasikan untuk status upload:
 
 ```sql
@@ -257,6 +271,12 @@ on public.message (id desc);
 
 create index if not exists idx_chat_sessions_last_used_at
 on public.chat_sessions (last_used_at);
+
+create index if not exists idx_chat_history_session_id
+on public.chat_history (session_id);
+
+create index if not exists idx_chat_history_time_start
+on public.chat_history (time_start desc);
 
 create index if not exists idx_metadata_table_metadata_name
 on public.metadata_table (metadata_name);
@@ -382,4 +402,57 @@ app/api/auth/login/route.ts       API login
 app/api/auth/logout/route.ts      API logout
 lib/db.ts                         Helper koneksi PostgreSQL
 lib/auth.ts                       Helper autentikasi
+```
+
+## Evaluasi RAGAS
+
+Script evaluasi tersedia di `scripts/run_ragas_evaluation.py`. File Excel input
+harus memiliki kolom `question`, `answer`, dan `context`. Kolom `reference`
+bersifat opsional dan dapat diisi manual sebagai jawaban acuan. Kolom
+`response_time_ms` juga opsional untuk membawa waktu respons chatbot yang
+dicatat oleh workflow n8n.
+
+Persiapan di Windows PowerShell:
+
+```powershell
+python -m venv .venv-ragas
+.\.venv-ragas\Scripts\Activate.ps1
+python -m pip install -r requirements-ragas.txt
+$env:OPENAI_API_KEY="OPENAI_API_KEY_ANDA"
+```
+
+Uji tiga data terlebih dahulu:
+
+```powershell
+python scripts\run_ragas_evaluation.py "ragas-data.xlsx" --limit 3
+```
+
+Jalankan seluruh data dan tentukan nama hasil:
+
+```powershell
+python scripts\run_ragas_evaluation.py "ragas-data.xlsx" -o "hasil-ragas.xlsx"
+```
+
+Tanpa `reference`, script menghitung `faithfulness`, `answer_relevancy`, dan
+`context_utilization`. Jika `reference` tersedia, script juga menghitung
+`context_precision`, `context_recall`, dan `factual_correctness`.
+
+Hasil juga memiliki `evaluation_time_seconds`, yaitu lama proses evaluasi RAGAS
+untuk setiap baris. Nilai ini berbeda dari `response_time_ms`, karena
+`response_time_ms` adalah lama chatbot menghasilkan jawaban saat digunakan
+oleh pengguna.
+
+Tambahkan kolom waktu respons ke PostgreSQL:
+
+```sql
+alter table public.ragas_data
+add column if not exists response_time_ms integer
+check (response_time_ms is null or response_time_ms >= 0);
+```
+
+Di n8n, simpan `Date.now()` sebelum AI Agent sebagai `started_at_ms`. Setelah
+AI Agent selesai, isi `response_time_ms` dengan:
+
+```text
+{{ Date.now() - $('Set Start Time').item.json.started_at_ms }}
 ```

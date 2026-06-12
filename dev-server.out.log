@@ -1,53 +1,9 @@
 
-> chatbot-admin@0.1.0 dev
-> next dev --hostname 127.0.0.1 --port 3001
+> chatbot-admin@0.1.0 start
+> next start -p 3000
 
   ▲ Next.js 14.2.35
-  - Local:        http://127.0.0.1:3001
-  - Network:      http://127.0.0.1:3001
-  - Environments: .env.local
+  - Local:        http://localhost:3000
 
  ✓ Starting...
- ✓ Ready in 2.5s
- ○ Compiling /login ...
- ✓ Compiled /login in 4.2s (481 modules)
- GET /login 200 in 4453ms
- ✓ Compiled /api/admin/documents in 311ms (270 modules)
- GET /api/admin/documents 401 in 409ms
- ○ Compiling / ...
- ✓ Compiled / in 1527ms (506 modules)
- GET / 307 in 1749ms
- GET /login 200 in 28ms
- ✓ Compiled /api/auth/login in 96ms (278 modules)
- POST /api/auth/login 200 in 972ms
- ✓ Compiled /api/admin/overview in 278ms (281 modules)
- GET /api/admin/overview?range=yesterday 200 in 3570ms
- GET /api/admin/overview?range=today 200 in 24053ms
- GET /api/admin/documents?page=1&limit=10 200 in 952ms
- GET /api/admin/overview?range=today 200 in 14066ms
- GET /api/admin/documents?metadata=Data%20Kampus%20Universitas%20Bandar%20Lampung%20(UBL).xlsx&page=1&limit=10 200 in 805ms
- GET /api/admin/overview?range=today 200 in 20530ms
- ✓ Compiled /api/admin/chats in 272ms (277 modules)
- GET /api/admin/chats?page=1&limit=10 200 in 6450ms
- GET /api/admin/chats?session=33b1c4f2-9cd9-438d-afdb-33fa59b26926&page=1&limit=5 200 in 15568ms
- ✓ Compiled in 1036ms (478 modules)
- ✓ Compiled in 554ms (478 modules)
- GET / 200 in 1215ms
- ✓ Compiled /api/admin/overview in 294ms (277 modules)
- GET /api/admin/overview?range=today 200 in 24104ms
- ✓ Compiled /api/admin/documents in 367ms (276 modules)
- ✓ Compiled /api/admin/chats in 258ms (279 modules)
- GET /api/admin/documents?page=1&limit=10 200 in 4677ms
- GET /api/admin/chats?page=1&limit=10 200 in 5021ms
- ✓ Compiled in 302ms (248 modules)
- ✓ Compiled in 1045ms (478 modules)
- ✓ Compiled in 506ms (478 modules)
- ✓ Compiled in 552ms (492 modules)
- ✓ Compiled /api/admin/documents in 488ms (276 modules)
- GET /api/admin/documents?page=1&limit=10 200 in 4624ms
- ✓ Compiled /api/admin/chats in 267ms (279 modules)
- GET /api/admin/chats?page=1&limit=10 200 in 1222ms
- ○ Compiling /_error ...
- ✓ Compiled /_error in 1683ms (736 modules)
- GET / 500 in 1989ms
- GET / 500 in 22ms
+ ✓ Ready in 577ms

@@ -1178,15 +1178,70 @@ tbody tr:hover {
   justify-content: space-between;
 }
 
-.category-badge {
-  background: rgba(54, 79, 199, 0.08);
-  border: 1px solid rgba(54, 79, 199, 0.18);
-  border-radius: 999px;
-  color: var(--indigo);
+.conversation-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.conversation-actions {
+  justify-content: space-between;
+}
+
+.compact-button {
+  min-height: 34px;
+  padding: 7px 11px;
+}
+
+.nested-modal {
+  z-index: 100;
+}
+
+.context-dialog {
+  max-width: 900px;
+}
+
+.context-list {
+  display: grid;
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.context-card {
+  background: rgba(241, 246, 252, 0.72);
+  border: 1px solid rgba(112, 132, 162, 0.2);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.context-number {
+  color: var(--brand-strong);
   font-size: 12px;
   font-weight: 900;
-  padding: 6px 10px;
-  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+.context-card pre {
+  font-family: inherit;
+  line-height: 1.6;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.context-card details {
+  border-top: 1px solid rgba(112, 132, 162, 0.18);
+  padding-top: 10px;
+}
+
+.context-card summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 850;
 }
 
 .bubble {

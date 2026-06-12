@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/auth";
 import { formatDbError, getColumns, pickColumn, quoteIdent, rowsToJsonExpression, withClient } from "@/lib/db";
-import { asText, isInternalAgentMessage, looksLikeAnswer, looksLikeQuestion, normalizeMessage } from "@/lib/normalize";
+import { asText } from "@/lib/normalize";
 import {
   addWibDays,
   formatWibDateOnly,
@@ -200,70 +200,57 @@ export async function GET(request: Request) {
   const filter = getFilterFromUrl(request.url);
 
   try {
-      const data = await withClient(async (client) => {
-        const messageInfo = await getColumns(client, "message");
-        const sessionInfo = await getColumns(client, "chat_sessions");
+    const data = await withClient(async (client) => {
+      const historyInfo = await getColumns(client, "chat_history");
+      const sessionColumn = pickColumn(historyInfo.columns, ["session_id", "sessionId"]);
+      const questionColumn = pickColumn(historyInfo.columns, ["question"]);
+      const answerColumn = pickColumn(historyInfo.columns, ["answer"]);
+      const timeColumn = pickColumn(historyInfo.columns, ["time_start", "started_at", "created_at"]);
+      const idColumn = pickColumn(historyInfo.columns, ["id"]);
 
-      const messageTime = pickColumn(messageInfo.columns, ["created_at", "createdAt", "timestamp", "date", "time"]);
-      const sessionCreated = pickColumn(sessionInfo.columns, ["created_at", "createdAt", "timestamp", "date"]);
-      const messageSession = pickColumn(messageInfo.columns, ["session_id", "sessionId"]);
-      const messageId = pickColumn(messageInfo.columns, ["id"]);
+      if (!sessionColumn || !questionColumn || !answerColumn) {
+        throw new Error("Tabel chat_history harus memiliki kolom session_id, question, dan answer.");
+      }
 
-      const messageWhere = messageTime
-        ? `where m.${quoteIdent(messageTime)} >= $1::timestamp and m.${quoteIdent(messageTime)} < $2::timestamp`
-        : "";
-      const sessionWhere = sessionCreated
-        ? `where s.${quoteIdent(sessionCreated)} >= $1::timestamp and s.${quoteIdent(sessionCreated)} < $2::timestamp`
+      const historyWhere = timeColumn
+        ? `where h.${quoteIdent(timeColumn)} >= $1::timestamp and h.${quoteIdent(timeColumn)} < $2::timestamp`
         : "";
       const timeParams = [filter.startSql, filter.endSql];
 
-      const [sessionCount, rawMessages] = await Promise.all([
-        client.query(`select count(*)::int as count from ${sessionInfo.table.sql} s ${sessionWhere}`, sessionCreated ? timeParams : []),
+      const [sessionCount, rawHistory] = await Promise.all([
+        client.query<{ count: number }>(
+          `
+            select count(distinct h.${quoteIdent(sessionColumn)})::int as count
+            from ${historyInfo.table.sql} h
+            ${historyWhere}
+          `,
+          timeColumn ? timeParams : []
+        ),
         client.query(
           `
-            select ${rowsToJsonExpression("m", messageInfo.columns)} as row
-            from ${messageInfo.table.sql} m
-            ${messageWhere}
-            ${messageTime ? `order by m.${quoteIdent(messageTime)} desc` : messageId ? `order by m.${quoteIdent(messageId)} desc` : ""}
-            limit 1500
+            select ${rowsToJsonExpression("h", historyInfo.columns)} as row
+            from ${historyInfo.table.sql} h
+            ${historyWhere}
+            ${timeColumn ? `order by h.${quoteIdent(timeColumn)} asc` : idColumn ? `order by h.${quoteIdent(idColumn)} asc` : ""}
+            limit 10000
           `,
-          messageTime ? timeParams : []
+          timeColumn ? timeParams : []
         )
       ]);
 
-      const normalized = rawMessages.rows
-        .map((item) => normalizeMessage(item.row))
-        .filter((item) => !isInternalAgentMessage(item.role, item.content));
-      const questions = normalized.filter((item) => looksLikeQuestion(item.role) && item.content);
-      const questionSeries = buildQuestionSeries(questions, messageTime, filter.start, filter.end, filter.granularity);
-      const unansweredPattern =
-        /tidak tahu|tidak bisa|tidak tercantum|tidak tersedia|tidak ditemukan|tidak memiliki data|data .* tidak ada|belum tersedia|belum menemukan|not found|i don't know|mohon maaf/i;
-      const unansweredPairs: Array<{
-        sessionId: string;
-        question: string;
-        answer: string;
-        createdAt?: string;
-      }> = [];
-      const pendingQuestions = new Map<string, string>();
-
-      for (const item of normalized.reverse()) {
-        const sessionId = messageSession ? asText(item.raw[messageSession]) : "default";
-
-        if (looksLikeQuestion(item.role)) {
-          pendingQuestions.set(sessionId, item.content);
-        } else if (looksLikeAnswer(item.role) && pendingQuestions.has(sessionId)) {
-          const question = pendingQuestions.get(sessionId) || "";
-          if (unansweredPattern.test(item.content)) {
-            unansweredPairs.push({
-              sessionId,
-              question,
-              answer: item.content,
-              createdAt: messageTime ? asText(item.raw[messageTime]) : undefined
-            });
-          }
-          pendingQuestions.delete(sessionId);
-        }
-      }
+      const questions = rawHistory.rows
+        .map((item) => ({ raw: item.row as Record<string, unknown> }))
+        .filter((item) => asText(item.raw[questionColumn]));
+      const questionSeries = buildQuestionSeries(questions, timeColumn, filter.start, filter.end, filter.granularity);
+      const unansweredPattern = /\bmaaf\b/i;
+      const unansweredPairs = questions
+        .filter((item) => unansweredPattern.test(asText(item.raw[answerColumn])))
+        .map((item) => ({
+          sessionId: asText(item.raw[sessionColumn]),
+          question: asText(item.raw[questionColumn]),
+          answer: asText(item.raw[answerColumn]),
+          createdAt: timeColumn ? asText(item.raw[timeColumn]) : undefined
+        }));
 
       return {
         range: filter.range,

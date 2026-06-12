@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentAdmin } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
-import { formatDbError, getColumns, pickColumn, quoteIdent, rowsToJsonExpression, withClient } from "@/lib/db";
-import { isInternalAgentMessage, looksLikeAnswer, looksLikeQuestion, normalizeMessage } from "@/lib/normalize";
+import { formatDbError, getColumns, pickColumn, quoteIdent, withClient } from "@/lib/db";
 import {
   addWibDays,
   getCurrentWibWallClock,
@@ -74,56 +73,17 @@ function getFilter(searchParams: URLSearchParams) {
   };
 }
 
-function buildPairs(
-  messages: Array<{
-    sessionId: string;
-    createdAt?: string;
-    role: string;
-    content: string;
-    category: string;
-  }>
-) {
-  const pairs: Array<{ sessionId: string; question: string; answer: string; category?: string; createdAt?: string }> = [];
-  const pending = new Map<string, { question: string; category: string; createdAt?: string }>();
-
-  for (const item of messages) {
-    if (looksLikeQuestion(item.role)) {
-      pending.set(item.sessionId, {
-        question: item.content,
-        category: item.category,
-        createdAt: item.createdAt
-      });
-    } else if (looksLikeAnswer(item.role) && pending.has(item.sessionId)) {
-      const question = pending.get(item.sessionId);
-      if (question) {
-        pairs.push({
-          sessionId: item.sessionId,
-          question: question.question,
-          answer: item.content,
-          category: question.category || item.category,
-          createdAt: question.createdAt || item.createdAt
-        });
-      }
-      pending.delete(item.sessionId);
-    }
-  }
-
-  for (const [sessionId, item] of pending) {
-    pairs.push({
-      sessionId,
-      question: item.question,
-      answer: "",
-      category: item.category,
-      createdAt: item.createdAt
-    });
-  }
-
-  return pairs;
-}
-
 function toExcelBuffer(rows: Array<Record<string, unknown>>) {
   const worksheet = XLSX.utils.json_to_sheet(rows, {
-    header: ["id", "question", "answer", "context", "reference", "created_at"]
+    header: [
+      "id",
+      "question",
+      "answer",
+      "context",
+      "reference",
+      "response_time_ms",
+      "created_at"
+    ]
   });
   worksheet["!cols"] = [
     { wch: 10 },
@@ -131,6 +91,7 @@ function toExcelBuffer(rows: Array<Record<string, unknown>>) {
     { wch: 64 },
     { wch: 100 },
     { wch: 64 },
+    { wch: 20 },
     { wch: 24 }
   ];
   const workbook = XLSX.utils.book_new();
@@ -191,6 +152,11 @@ export async function GET(request: Request) {
         const answerColumn = pickColumn(ragasInfo.columns, ["answer"]);
         const contextColumn = pickColumn(ragasInfo.columns, ["context"]);
         const createdAtColumn = pickColumn(ragasInfo.columns, ["created_at", "createdAt", "timestamp"]);
+        const responseTimeColumn = pickColumn(ragasInfo.columns, [
+          "response_time_ms",
+          "responseTimeMs",
+          "response_time"
+        ]);
 
         if (!questionColumn || !answerColumn || !contextColumn) {
           throw new Error("Tabel ragas_data harus memiliki kolom question, answer, dan context.");
@@ -221,6 +187,7 @@ export async function GET(request: Request) {
           question: string;
           answer: string;
           context: unknown;
+          response_time_ms?: number;
           created_at?: string;
         }>(
           `
@@ -229,6 +196,7 @@ export async function GET(request: Request) {
               r.${quoteIdent(questionColumn)}::text as question,
               r.${quoteIdent(answerColumn)}::text as answer,
               r.${quoteIdent(contextColumn)} as context,
+              ${responseTimeColumn ? `r.${quoteIdent(responseTimeColumn)}::integer` : "null"} as response_time_ms,
               ${createdAtColumn ? `r.${quoteIdent(createdAtColumn)}::text` : "null"} as created_at
             from ${ragasInfo.table.sql} r
             ${conditions.length ? `where ${conditions.join(" and ")}` : ""}
@@ -252,97 +220,95 @@ export async function GET(request: Request) {
             answer: row.answer,
             context: contextToExcel(row.context),
             reference: "",
+            response_time_ms: row.response_time_ms ?? "",
             created_at: row.created_at || ""
           }))
         };
       }
 
-      const info = await getColumns(client, "message");
-      const sessionColumn = pickColumn(info.columns, ["session_id", "sessionId", "sesson_id", "id_session"]);
-      const timeColumn = pickColumn(info.columns, ["created_at", "createdAt", "timestamp", "date", "time"]);
-      const idColumn = pickColumn(info.columns, ["id"]);
+      const historyInfo = await getColumns(client, "chat_history");
+      const idColumn = pickColumn(historyInfo.columns, ["id"]);
+      const sessionColumn = pickColumn(historyInfo.columns, ["session_id", "sessionId"]);
+      const questionColumn = pickColumn(historyInfo.columns, ["question"]);
+      const answerColumn = pickColumn(historyInfo.columns, ["answer"]);
+      const contextColumn = pickColumn(historyInfo.columns, ["context"]);
+      const timeStartColumn = pickColumn(historyInfo.columns, ["time_start", "started_at", "created_at"]);
+      const timeEndColumn = pickColumn(historyInfo.columns, ["time_end", "ended_at", "completed_at"]);
 
-      if (!sessionColumn) {
-        throw new Error("Kolom session id tidak ditemukan di tabel message.");
+      if (!sessionColumn || !questionColumn || !answerColumn) {
+        throw new Error("Tabel chat_history harus memiliki kolom session_id, question, dan answer.");
       }
 
-      const timeCondition = timeColumn && !includeAll
-        ? `m.${quoteIdent(timeColumn)} >= $1::timestamp and m.${quoteIdent(timeColumn)} < $2::timestamp`
-        : "true";
-      const timeParams = timeColumn && !includeAll ? [filter.startSql, filter.endSql] : [];
+      const searchableColumns = [
+        `h.${quoteIdent(sessionColumn)}::text`,
+        `h.${quoteIdent(questionColumn)}::text`,
+        `h.${quoteIdent(answerColumn)}::text`,
+        contextColumn ? `h.${quoteIdent(contextColumn)}::text` : ""
+      ].filter(Boolean);
 
       if (!session) {
-        const sessionInfo = await getColumns(client, "chat_sessions");
-        const sessionIdColumn = pickColumn(sessionInfo.columns, ["session_id", "sessionId"]);
-        const lastUsedColumn = pickColumn(sessionInfo.columns, ["last_used_at", "lastUsedAt", "updated_at", "created_at"]);
+        const conditions: string[] = [];
+        const params: unknown[] = [];
 
-        if (!sessionIdColumn) {
-          throw new Error("Kolom session_id tidak ditemukan di tabel chat_sessions.");
+        if (timeStartColumn && !includeAll) {
+          params.push(filter.startSql, filter.endSql);
+          conditions.push(
+            `h.${quoteIdent(timeStartColumn)} >= $1::timestamp and h.${quoteIdent(timeStartColumn)} < $2::timestamp`
+          );
         }
 
-        const lastSeenExpression = timeColumn
-          ? `coalesce(max(m.${quoteIdent(timeColumn)})::text, ${
-              lastUsedColumn ? `cs.${quoteIdent(lastUsedColumn)}::text` : "null"
-            })`
-          : lastUsedColumn
-            ? `cs.${quoteIdent(lastUsedColumn)}::text`
-            : "null";
-        const orderExpression = timeColumn
-          ? `max(m.${quoteIdent(timeColumn)}) desc nulls last`
-          : lastUsedColumn
-            ? `cs.${quoteIdent(lastUsedColumn)} desc`
-            : "";
-        const joinCondition = `
-          m.${quoteIdent(sessionColumn)}::text = cs.${quoteIdent(sessionIdColumn)}::text
-          ${timeColumn ? `and ${timeCondition}` : ""}
-        `;
-        const searchCondition = search
-          ? `where cs.${quoteIdent(sessionIdColumn)}::text ilike $${timeParams.length + 1}::text
-              or m.message::text ilike $${timeParams.length + 1}::text`
-          : "";
-        const searchParams = search ? [`%${search}%`] : [];
-        const limitParam = timeParams.length + searchParams.length + 1;
-        const offsetParam = timeParams.length + searchParams.length + 2;
+        if (search) {
+          params.push(`%${search}%`);
+          const searchParam = `$${params.length}`;
+          conditions.push(`(${searchableColumns.map((column) => `${column} ilike ${searchParam}::text`).join(" or ")})`);
+        }
 
-        const [countResult, sessions] = await Promise.all([
+        const whereSql = conditions.length ? `where ${conditions.join(" and ")}` : "";
+        const limitParam = params.length + 1;
+        const offsetParam = params.length + 2;
+        const lastSeenExpression = timeStartColumn
+          ? `max(h.${quoteIdent(timeStartColumn)})::text`
+          : idColumn
+            ? `max(h.${quoteIdent(idColumn)})::text`
+            : "null";
+        const orderExpression = timeStartColumn
+          ? `max(h.${quoteIdent(timeStartColumn)}) desc nulls last`
+          : idColumn
+            ? `max(h.${quoteIdent(idColumn)}) desc`
+            : `"sessionId"`;
+
+        const [countResult, sessionResult] = await Promise.all([
           client.query<{ total: number }>(
             `
               select count(*)::int as total
               from (
-                select cs.${quoteIdent(sessionIdColumn)}
-                from ${sessionInfo.table.sql} cs
-                join ${info.table.sql} m on ${joinCondition}
-                ${searchCondition}
-                group by cs.${quoteIdent(sessionIdColumn)}
+                select h.${quoteIdent(sessionColumn)}
+                from ${historyInfo.table.sql} h
+                ${whereSql}
+                group by h.${quoteIdent(sessionColumn)}
               ) filtered_sessions
             `,
-            [...timeParams, ...searchParams]
+            params
           ),
           client.query<{ sessionId: string; total: number; lastSeen?: string }>(
             `
               select
-                cs.${quoteIdent(sessionIdColumn)}::text as "sessionId",
-                count(m.${quoteIdent(sessionColumn)}) filter (
-                  where
-                    lower(coalesce(m.message->>'type', m.message->>'role', '')) in ('human', 'user', 'question', 'input')
-                    or lower(coalesce(m.message->>'type', m.message->>'role', '')) like '%human%'
-                    or lower(coalesce(m.message->>'type', m.message->>'role', '')) like '%user%'
-                    or lower(coalesce(m.message->>'type', m.message->>'role', '')) like '%question%'
-                )::int as total,
+                h.${quoteIdent(sessionColumn)}::text as "sessionId",
+                count(*)::int as total,
                 ${lastSeenExpression} as "lastSeen"
-              from ${sessionInfo.table.sql} cs
-              join ${info.table.sql} m on ${joinCondition}
-              ${searchCondition}
-              group by cs.${quoteIdent(sessionIdColumn)} ${lastUsedColumn ? `, cs.${quoteIdent(lastUsedColumn)}` : ""}
-              ${orderExpression ? `order by ${orderExpression}` : ""}
+              from ${historyInfo.table.sql} h
+              ${whereSql}
+              group by h.${quoteIdent(sessionColumn)}
+              order by ${orderExpression}
               limit $${limitParam}::int offset $${offsetParam}::int
             `,
-            [...timeParams, ...searchParams, limit, offset]
+            [...params, limit, offset]
           )
         ]);
         const total = countResult.rows[0]?.total || 0;
+
         return {
-          sessions: sessions.rows,
+          sessions: sessionResult.rows,
           pagination: {
             page,
             limit,
@@ -352,45 +318,74 @@ export async function GET(request: Request) {
         };
       }
 
-      const result = await client.query<{ session_id: string; created_at?: string; raw: Record<string, unknown> }>(
+      const conditions: string[] = [];
+      const params: unknown[] = [session];
+      conditions.push(`h.${quoteIdent(sessionColumn)}::text = $1::text`);
+
+      if (timeStartColumn && !includeAll) {
+        params.push(filter.startSql, filter.endSql);
+        conditions.push(
+          `h.${quoteIdent(timeStartColumn)} >= $2::timestamp and h.${quoteIdent(timeStartColumn)} < $3::timestamp`
+        );
+      }
+
+      if (search) {
+        params.push(`%${search}%`);
+        const searchParam = `$${params.length}`;
+        conditions.push(`(${searchableColumns.map((column) => `${column} ilike ${searchParam}::text`).join(" or ")})`);
+      }
+
+      const whereSql = `where ${conditions.join(" and ")}`;
+      const countResult = await client.query<{ total: number }>(
+        `select count(*)::int as total from ${historyInfo.table.sql} h ${whereSql}`,
+        params
+      );
+      const total = countResult.rows[0]?.total || 0;
+      const limitParam = params.length + 1;
+      const offsetParam = params.length + 2;
+      const responseTimeExpression =
+        timeStartColumn && timeEndColumn
+          ? `greatest(
+              round(extract(epoch from (h.${quoteIdent(timeEndColumn)} - h.${quoteIdent(timeStartColumn)})) * 1000)::bigint,
+              0
+            )`
+          : "null";
+
+      const historyResult = await client.query<{
+        id?: string;
+        sessionId: string;
+        question: string;
+        answer: string;
+        context?: unknown;
+        createdAt?: string;
+        responseTimeMs?: number;
+      }>(
         `
           select
-            m.${quoteIdent(sessionColumn)}::text as session_id,
-            ${timeColumn ? `m.${quoteIdent(timeColumn)}::text` : "null"} as created_at,
-            ${rowsToJsonExpression("m", info.columns)} as raw
-          from ${info.table.sql} m
-          where m.${quoteIdent(sessionColumn)}::text = $${timeParams.length + 1}
-            and ${timeCondition}
-          ${timeColumn ? `order by m.${quoteIdent(timeColumn)} asc` : idColumn ? `order by m.${quoteIdent(idColumn)} asc` : ""}
-          limit ${includeAll ? "10000" : "1500"}
+            ${idColumn ? `h.${quoteIdent(idColumn)}::text` : "null"} as id,
+            h.${quoteIdent(sessionColumn)}::text as "sessionId",
+            h.${quoteIdent(questionColumn)}::text as question,
+            h.${quoteIdent(answerColumn)}::text as answer,
+            ${contextColumn ? `h.${quoteIdent(contextColumn)}` : "'[]'::jsonb"} as context,
+            ${timeStartColumn ? `h.${quoteIdent(timeStartColumn)}::text` : "null"} as "createdAt",
+            ${responseTimeExpression} as "responseTimeMs"
+          from ${historyInfo.table.sql} h
+          ${whereSql}
+          order by ${
+            timeStartColumn
+              ? `h.${quoteIdent(timeStartColumn)} asc`
+              : idColumn
+                ? `h.${quoteIdent(idColumn)} asc`
+                : `h.${quoteIdent(sessionColumn)} asc`
+          }
+          ${includeAll ? "limit 10000" : `limit $${limitParam}::int offset $${offsetParam}::int`}
         `,
-        [...timeParams, session]
+        includeAll ? params : [...params, limit, offset]
       );
-
-      const messages = result.rows
-        .map((row) => ({
-          sessionId: row.session_id,
-          createdAt: row.created_at,
-          ...normalizeMessage(row.raw)
-        }))
-        .filter((item) => !isInternalAgentMessage(item.role, item.content));
-
-      const pairs = buildPairs(messages);
-      const filteredPairs = search
-        ? pairs.filter(
-            (pair) =>
-              pair.sessionId.toLowerCase().includes(search.toLowerCase()) ||
-              pair.question.toLowerCase().includes(search.toLowerCase()) ||
-              pair.answer.toLowerCase().includes(search.toLowerCase())
-          )
-        : pairs;
-      const total = filteredPairs.length;
-      const paginatedPairs = includeAll ? filteredPairs : filteredPairs.slice(offset, offset + limit);
 
       return {
         session,
-        messages,
-        pairs: paginatedPairs,
+        pairs: historyResult.rows,
         pagination: {
           page: includeAll ? 1 : page,
           limit: includeAll ? Math.max(total, 1) : limit,
