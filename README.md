@@ -128,12 +128,8 @@ GET /api/admin/rag-upload?fileName=nama-file.xlsx
 POST /api/admin/rag-upload
 ```
 
-7. API meneruskan file, mode upload, dan nama file ke `N8N_RAG_UPLOAD_WEBHOOK`.
-8. n8n mengelola `metadata_table`, memproses chunk dan embedding, menyimpan
-   `documents`, memverifikasi jumlah data, lalu mengembalikan hasil ke website.
-9. Website tidak melakukan insert, update, atau delete data RAG.
-
-Konfigurasi workflow lengkap tersedia di `docs/n8n-rag-upload.md`.
+7. API meneruskan file ke `N8N_RAG_UPLOAD_WEBHOOK`.
+8. API mencatat status file ke `metadata_table` jika kolom status tersedia.
 
 ### Data RAG
 
