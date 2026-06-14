@@ -1,0 +1,112 @@
+export type Tab = "dashboard" | "rag" | "chat";
+
+export type Range =
+  | "today"
+  | "yesterday"
+  | "this_week"
+  | "last_week"
+  | "this_month"
+  | "last_month"
+  | "custom";
+
+export type Overview = {
+  stats: {
+    users: number;
+    chats: number;
+    unanswered: number;
+  };
+  questionSeries: Array<{ label: string; count: number }>;
+  unansweredSamples: UnansweredItem[];
+};
+
+export type UnansweredItem = {
+  sessionId: string;
+  question: string;
+  answer: string;
+  createdAt?: string;
+};
+
+export type DocumentRow = {
+  id: string;
+  metadata_name: string;
+  preview: string;
+  raw: Record<string, unknown>;
+};
+
+export type MetadataRow = {
+  metadata_name: string;
+  created_at?: string;
+  document_count: number;
+  status?: string;
+  error_message?: string;
+};
+
+export type DocumentsResponse = {
+  mode: "metadata" | "documents";
+  metadataName?: string;
+  rows: Array<DocumentRow | MetadataRow>;
+  pagination?: PaginationInfo;
+  columns?: string[];
+  idColumn?: string;
+  metaColumn?: string;
+};
+
+export type ChatSession = {
+  sessionId: string;
+  total: number;
+  lastSeen?: string;
+};
+
+export type ChatPair = {
+  id?: string;
+  sessionId?: string;
+  question: string;
+  answer: string;
+  context?: unknown;
+  responseTimeMs?: number | string | null;
+  createdAt?: string;
+};
+
+export type PaginationInfo = {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+};
+
+export type ExcelSheetPreview = {
+  sheetName: string;
+  totalRows: number;
+  totalColumns: number;
+  headers: string[];
+  rows: string[][];
+};
+
+export type ExcelPreview = ExcelSheetPreview & {
+  fileName: string;
+  sheets: ExcelSheetPreview[];
+};
+
+export type ConfirmDialogState = {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  onConfirm: () => Promise<void>;
+};
+
+export type DuplicateCheckResponse = {
+  duplicate: boolean;
+};
+
+export const PAGE_SIZE = 10;
+export const UNANSWERED_PAGE_SIZE = 5;
+
+export const rangeLabel: Record<Range, string> = {
+  today: "Hari Ini",
+  yesterday: "Kemarin",
+  this_week: "Minggu Ini",
+  last_week: "Minggu Lalu",
+  this_month: "Bulan Ini",
+  last_month: "Bulan Lalu",
+  custom: "Custom"
+};
