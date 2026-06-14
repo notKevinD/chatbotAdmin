@@ -13,62 +13,6 @@ function splitFileName(fileName: string) {
   };
 }
 
-async function upsertMetadataStatus(
-  uploadFileName: string,
-  status: "processing" | "success" | "failed",
-  errorMessage?: string
-) {
-  await withClient(async (client) => {
-    const info = await getColumns(client, "metadata_table");
-    const nameColumn = pickColumn(info.columns, ["metadata_name", "metadataName", "name", "fileName", "source", "title"]);
-    const statusColumn = pickColumn(info.columns, ["status", "upload_status"]);
-    const errorColumn = pickColumn(info.columns, ["error_message", "errorMessage", "last_error"]);
-    const updatedColumn = pickColumn(info.columns, ["updated_at", "updatedAt"]);
-
-    if (!nameColumn) return;
-
-    await client.query(
-      `
-        insert into ${info.table.sql} (${quoteIdent(nameColumn)})
-        select $1::text
-        where not exists (
-          select 1 from ${info.table.sql}
-          where lower(${quoteIdent(nameColumn)}::text) = lower($1::text)
-        )
-      `,
-      [uploadFileName]
-    );
-
-    const sets: string[] = [];
-    const params: Array<string> = [uploadFileName];
-
-    if (statusColumn) {
-      params.push(status);
-      sets.push(`${quoteIdent(statusColumn)} = $${params.length}::text`);
-    }
-
-    if (errorColumn) {
-      params.push(errorMessage || "");
-      sets.push(`${quoteIdent(errorColumn)} = nullif($${params.length}::text, '')`);
-    }
-
-    if (updatedColumn) {
-      sets.push(`${quoteIdent(updatedColumn)} = now()`);
-    }
-
-    if (sets.length) {
-      await client.query(
-        `
-          update ${info.table.sql}
-          set ${sets.join(", ")}
-          where lower(${quoteIdent(nameColumn)}::text) = lower($1::text)
-        `,
-        params
-      );
-    }
-  });
-}
-
 async function checkDuplicateFileName(fileName: string) {
   const { base: fileBaseName } = splitFileName(fileName);
 
@@ -89,45 +33,6 @@ async function checkDuplicateFileName(fileName: string) {
     );
 
     return (result.rowCount || 0) > 0;
-  });
-}
-
-async function countDocumentsBySource(fileName: string) {
-  const { base: fileBaseName } = splitFileName(fileName);
-
-  return withClient(async (client) => {
-    const info = await getColumns(client, "documents");
-    const metadataColumn = pickColumn(info.columns, ["metadata"]);
-    const metadataSourceColumn = pickColumn(info.columns, ["metadata_source", "metadataSource"]);
-    const conditions: string[] = [];
-
-    if (metadataSourceColumn) {
-      conditions.push(
-        `lower(${quoteIdent(metadataSourceColumn)}::text) in (lower($1::text), lower($2::text))`
-      );
-    }
-
-    if (metadataColumn) {
-      const metadata = quoteIdent(metadataColumn);
-      conditions.push(`lower(${metadata}->>'source') in (lower($1::text), lower($2::text))`);
-      conditions.push(`lower(${metadata}#>>'{source,source}') in (lower($1::text), lower($2::text))`);
-      conditions.push(`lower(${metadata}->>'metadata_name') in (lower($1::text), lower($2::text))`);
-      conditions.push(`lower(${metadata}->>'metadataName') in (lower($1::text), lower($2::text))`);
-      conditions.push(`lower(${metadata}->>'fileName') in (lower($1::text), lower($2::text))`);
-    }
-
-    if (!conditions.length) return 0;
-
-    const result = await client.query<{ count: number }>(
-      `
-        select count(*)::int as count
-        from ${info.table.sql}
-        where ${conditions.join("\n           or ")}
-      `,
-      [fileName, fileBaseName]
-    );
-
-    return result.rows[0]?.count || 0;
   });
 }
 
@@ -191,43 +96,6 @@ export async function POST(request: Request) {
       );
     }
 
-    if (duplicate && mode === "overwrite") {
-      await withClient(async (client) => {
-        const metadataInfo = await getColumns(client, "metadata_table");
-        const documentInfo = await getColumns(client, "documents");
-        const nameColumn = pickColumn(metadataInfo.columns, ["metadata_name", "metadataName", "name", "fileName", "source", "title"]);
-        const metadataColumn = pickColumn(documentInfo.columns, ["metadata"]);
-        const metadataSourceColumn = pickColumn(documentInfo.columns, ["metadata_source", "metadataSource"]);
-
-        if (metadataColumn || metadataSourceColumn) {
-          const conditions = [];
-          if (metadataSourceColumn) {
-            conditions.push(`${quoteIdent(metadataSourceColumn)}::text in ($1::text, $2::text)`);
-          }
-          if (metadataColumn) {
-            conditions.push(`${quoteIdent(metadataColumn)}->>'source' in ($1::text, $2::text)`);
-            conditions.push(`${quoteIdent(metadataColumn)}->>'metadata_name' in ($1::text, $2::text)`);
-            conditions.push(`${quoteIdent(metadataColumn)}->>'metadataName' in ($1::text, $2::text)`);
-            conditions.push(`${quoteIdent(metadataColumn)}->>'fileName' in ($1::text, $2::text)`);
-          }
-          await client.query(
-            `
-              delete from ${documentInfo.table.sql}
-              where ${conditions.join("\n                 or ")}
-            `,
-            [fileName, fileBaseName]
-          );
-        }
-
-        if (nameColumn) {
-          await client.query(
-            `delete from ${metadataInfo.table.sql} where ${quoteIdent(nameColumn)}::text in ($1::text, $2::text)`,
-            [fileName, fileBaseName]
-          );
-        }
-      });
-    }
-
     const uploadFile =
       uploadFileName === fileName
         ? file
@@ -236,8 +104,9 @@ export async function POST(request: Request) {
           });
     const form = new FormData();
     form.set("file", uploadFile);
-
-    await upsertMetadataStatus(uploadFileName, "processing");
+    form.set("mode", mode);
+    form.set("originalFileName", fileName);
+    form.set("uploadFileName", uploadFileName);
 
     const response = await fetch(webhook, {
       method: "POST",
@@ -245,9 +114,14 @@ export async function POST(request: Request) {
     });
 
     const text = await response.text();
+    let webhookResult: Record<string, unknown> = {};
+    try {
+      webhookResult = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    } catch {
+      webhookResult = {};
+    }
 
     if (!response.ok) {
-      await upsertMetadataStatus(uploadFileName, "failed", text || "Webhook n8n gagal memproses upload.");
       await writeAuditLog({
         request,
         userId: admin.id,
@@ -257,12 +131,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Webhook n8n gagal memproses upload.", detail: text }, { status: 502 });
     }
 
-    const documentCount = await countDocumentsBySource(uploadFileName);
+    const webhookOk = webhookResult.ok === true || webhookResult.success === true;
+    const documentCount = Number(
+      webhookResult.documentCount ?? webhookResult.document_count ?? webhookResult.count ?? 0
+    );
 
-    if (documentCount < 1) {
+    if (!webhookOk || !Number.isFinite(documentCount) || documentCount < 1) {
       const verificationError =
-        "Webhook n8n merespons berhasil, tetapi tidak ada data baru yang ditemukan di tabel documents. Periksa node chunking, embedding, dan PGVector Store.";
-      await upsertMetadataStatus(uploadFileName, "failed", verificationError);
+        "Respons n8n belum menyatakan proses RAG berhasil. Pastikan workflow mengembalikan ok: true dan documentCount setelah metadata, chunk, dan embedding tersimpan.";
       await writeAuditLog({
         request,
         userId: admin.id,
@@ -273,7 +149,9 @@ export async function POST(request: Request) {
           mode,
           duplicate,
           webhookStatus: response.status,
-          webhookResponse: text.slice(0, 1000)
+          webhookResponse: text.slice(0, 1000),
+          webhookOk,
+          documentCount
         }
       });
       return NextResponse.json(
@@ -285,7 +163,6 @@ export async function POST(request: Request) {
       );
     }
 
-    await upsertMetadataStatus(uploadFileName, "success");
     await writeAuditLog({
       request,
       userId: admin.id,
@@ -299,12 +176,9 @@ export async function POST(request: Request) {
       mode,
       metadataName: uploadFileName,
       documentCount,
-      response: text
+      response: webhookResult
     });
   } catch (error) {
-    if (typeof uploadFileName === "string") {
-      await upsertMetadataStatus(uploadFileName, "failed", formatDbError(error, "Upload gagal.")).catch(() => undefined);
-    }
     await writeAuditLog({
       request,
       userId: admin.id,
