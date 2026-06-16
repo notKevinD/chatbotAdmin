@@ -96,6 +96,13 @@ function parseStoredTimestamp(value: unknown) {
   return parseStoredTimestampAsWib(asText(value));
 }
 
+function asBooleanFlag(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  const normalized = asText(value).trim().toLowerCase();
+  return normalized === "true" || normalized === "t" || normalized === "1" || normalized === "yes";
+}
+
 function formatSeriesLabel(date: Date, granularity: Granularity) {
   const days = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
   const day = String(date.getUTCDate()).padStart(2, "0");
@@ -207,6 +214,7 @@ export async function GET(request: Request) {
       const answerColumn = pickColumn(historyInfo.columns, ["answer"]);
       const timeColumn = pickColumn(historyInfo.columns, ["time_start", "started_at", "created_at"]);
       const idColumn = pickColumn(historyInfo.columns, ["id"]);
+      const fallbackColumn = pickColumn(historyInfo.columns, ["isfallback", "isFallback", "is_fallback"]);
 
       if (!sessionColumn || !questionColumn || !answerColumn) {
         throw new Error("Tabel chat_history harus memiliki kolom session_id, question, dan answer.");
@@ -244,11 +252,16 @@ export async function GET(request: Request) {
       const questionSeries = buildQuestionSeries(questions, timeColumn, filter.start, filter.end, filter.granularity);
       const unansweredPattern = /\bmaaf\b/i;
       const unansweredPairs = questions
-        .filter((item) => unansweredPattern.test(asText(item.raw[answerColumn])))
+        .filter((item) =>
+          fallbackColumn
+            ? asBooleanFlag(item.raw[fallbackColumn])
+            : unansweredPattern.test(asText(item.raw[answerColumn]))
+        )
         .map((item) => ({
           sessionId: asText(item.raw[sessionColumn]),
           question: asText(item.raw[questionColumn]),
           answer: asText(item.raw[answerColumn]),
+          isFallback: fallbackColumn ? asBooleanFlag(item.raw[fallbackColumn]) : true,
           createdAt: timeColumn ? asText(item.raw[timeColumn]) : undefined
         }));
 

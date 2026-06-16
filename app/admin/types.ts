@@ -23,6 +23,7 @@ export type UnansweredItem = {
   sessionId: string;
   question: string;
   answer: string;
+  isFallback?: boolean;
   createdAt?: string;
 };
 
@@ -64,6 +65,7 @@ export type ChatPair = {
   answer: string;
   context?: unknown;
   responseTimeMs?: number | string | null;
+  isFallback?: boolean;
   createdAt?: string;
 };
 

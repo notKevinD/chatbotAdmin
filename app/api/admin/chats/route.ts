@@ -246,6 +246,7 @@ export async function GET(request: Request) {
       const contextColumn = pickColumn(historyInfo.columns, ["context"]);
       const timeStartColumn = pickColumn(historyInfo.columns, ["time_start", "started_at", "created_at"]);
       const timeEndColumn = pickColumn(historyInfo.columns, ["time_end", "ended_at", "completed_at"]);
+      const fallbackColumn = pickColumn(historyInfo.columns, ["isfallback", "isFallback", "is_fallback"]);
 
       if (!sessionColumn || !questionColumn || !answerColumn) {
         throw new Error("Tabel chat_history harus memiliki kolom session_id, question, dan answer.");
@@ -371,6 +372,7 @@ export async function GET(request: Request) {
         context?: unknown;
         createdAt?: string;
         responseTimeMs?: number;
+        isFallback?: boolean;
       }>(
         `
           select
@@ -380,7 +382,8 @@ export async function GET(request: Request) {
             h.${quoteIdent(answerColumn)}::text as answer,
             ${contextColumn ? `h.${quoteIdent(contextColumn)}` : "'[]'::jsonb"} as context,
             ${timeStartColumn ? `h.${quoteIdent(timeStartColumn)}::text` : "null"} as "createdAt",
-            ${responseTimeExpression} as "responseTimeMs"
+            ${responseTimeExpression} as "responseTimeMs",
+            ${fallbackColumn ? `coalesce(h.${quoteIdent(fallbackColumn)}, false)` : "false"} as "isFallback"
           from ${historyInfo.table.sql} h
           ${whereSql}
           order by ${

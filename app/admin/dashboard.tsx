@@ -71,7 +71,7 @@ export function Dashboard({ overview, range }: { overview: Overview | null; rang
 
       <section className="panel">
         <div className="panel-head">
-          <h2>Pertanyaan yang Belum Terjawab</h2>
+          <h2>Jawaban Bermasalah</h2>
         </div>
         {unansweredItems.length ? (
           <>
@@ -163,6 +163,7 @@ function SessionConversationDialog({
               <article className="conversation-card" key={`${pair.createdAt || "chat"}-${index}`}>
                 <div className="conversation-meta-line">
                   <div className="conversation-time">{formatIndonesianDateTime(pair.createdAt)}</div>
+                  {pair.isFallback ? <span className="status-badge status-failed">Jawaban bermasalah</span> : null}
                 </div>
                 <div className="bubble user-bubble">
                   <span>Question from user</span>

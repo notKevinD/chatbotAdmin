@@ -165,6 +165,7 @@ export function ChatPanel({
             <article className="conversation-card" key={`${pair.createdAt}-${index}`}>
               <div className="conversation-meta-line">
                 <div className="conversation-time">{formatIndonesianDateTime(pair.createdAt)}</div>
+                {pair.isFallback ? <span className="status-badge status-failed">Jawaban bermasalah</span> : null}
               </div>
               <div className="bubble user-bubble">
                 <span>Question from user</span>
