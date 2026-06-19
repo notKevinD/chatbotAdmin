@@ -255,26 +255,39 @@ export function ExcelPreviewDialog({
 }
 
 export function QuestionChart({
+  granularity,
   range,
   series
 }: {
+  granularity?: "three_hour" | "day" | "week" | "month";
   range: Range;
   series: Array<{ label: string; count: number }>;
 }) {
   const max = Math.max(...series.map((item) => item.count), 1);
   const ticks = Array.from({ length: 5 }, (_, index) => Math.round((max / 4) * (4 - index)));
+  const granularityTitle =
+    granularity === "three_hour"
+      ? "Grafik Pertanyaan per 3 Jam"
+      : granularity === "day"
+        ? "Grafik Pertanyaan per Hari"
+        : granularity === "week"
+          ? "Grafik Pertanyaan per Minggu"
+          : granularity === "month"
+            ? "Grafik Pertanyaan per Bulan"
+            : undefined;
   const title =
-    range === "today" || range === "yesterday"
+    granularityTitle ||
+    (range === "today" || range === "yesterday"
       ? "Grafik Pertanyaan per 3 Jam"
       : range === "this_week" || range === "last_week"
         ? "Grafik Pertanyaan per Hari"
         : range === "this_month" || range === "last_month"
           ? "Grafik Pertanyaan per Minggu"
           : range === "this_year" || range === "all"
-            ? "Grafik Pertanyaan per Minggu"
+            ? "Grafik Pertanyaan per Bulan"
             : range === "custom"
               ? "Grafik Pertanyaan Custom"
-              : "Grafik Pertanyaan per Tanggal";
+              : "Grafik Pertanyaan per Tanggal");
 
   return (
     <section className="panel chart-panel">

@@ -23,7 +23,7 @@ type RangeName =
   | "this_year"
   | "all"
   | "custom";
-type Granularity = "three_hour" | "day" | "week";
+type Granularity = "three_hour" | "day" | "week" | "month";
 
 function pad(value: number) {
   return String(value).padStart(2, "0");
@@ -31,6 +31,10 @@ function pad(value: number) {
 
 function addDays(date: Date, days: number) {
   return addWibDays(date, days);
+}
+
+function addMonths(date: Date, months: number) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1));
 }
 
 function getFilterFromUrl(url: string) {
@@ -94,10 +98,12 @@ function getFilterFromUrl(url: string) {
   const durationDays = Math.ceil(durationMs / (24 * 60 * 60 * 1000));
   const granularity: Granularity =
     range === "all"
-      ? "week"
+      ? "month"
       : durationMs <= 24 * 60 * 60 * 1000
       ? "three_hour"
-      : range === "this_month" || range === "last_month" || durationDays > 31
+      : range === "this_year" || durationDays > 31
+        ? "month"
+      : range === "this_month" || range === "last_month" || (range === "custom" && durationDays >= 28)
         ? "week"
         : "day";
 
@@ -165,6 +171,11 @@ function formatSeriesLabel(date: Date, granularity: Granularity) {
   return `${days[date.getUTCDay()]} ${day}`;
 }
 
+function formatMonthLabel(date: Date) {
+  const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+  return `${months[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}
+
 function formatHourRangeLabel(date: Date) {
   const startHour = date.getUTCHours();
   const endHour = startHour + 2;
@@ -172,9 +183,24 @@ function formatHourRangeLabel(date: Date) {
 }
 
 function formatWeekLabel(index: number, start: Date, end: Date) {
+  const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+  const endInclusive = addDays(end, -1);
   const startDay = pad(start.getUTCDate());
-  const endDay = pad(addDays(end, -1).getUTCDate());
-  return `Minggu ${index} (${startDay}-${endDay})`;
+  const endDay = pad(endInclusive.getUTCDate());
+  const startMonth = months[start.getUTCMonth()];
+  const endMonth = months[endInclusive.getUTCMonth()];
+  const startYear = start.getUTCFullYear();
+  const endYear = endInclusive.getUTCFullYear();
+
+  if (startYear !== endYear) {
+    return `Minggu ${index} (${startDay} ${startMonth} ${startYear}-${endDay} ${endMonth} ${endYear})`;
+  }
+
+  if (startMonth !== endMonth) {
+    return `Minggu ${index} (${startDay} ${startMonth}-${endDay} ${endMonth} ${endYear})`;
+  }
+
+  return `Minggu ${index} (${startDay}-${endDay} ${endMonth} ${endYear})`;
 }
 
 function getBucketKey(date: Date, granularity: Granularity, origin?: Date) {
@@ -188,6 +214,10 @@ function getBucketKey(date: Date, granularity: Granularity, origin?: Date) {
     const dayIndex = Math.floor((date.getTime() - originDate.getTime()) / (24 * 60 * 60 * 1000));
     const weekIndex = Math.floor(dayIndex / 7) + 1;
     return `week-${weekIndex}`;
+  }
+
+  if (granularity === "month") {
+    return `${date.getUTCFullYear()}-${date.getUTCMonth()}`;
   }
 
   return `${date.getUTCFullYear()}-${date.getUTCMonth()}-${date.getUTCDate()}`;
@@ -211,6 +241,7 @@ function buildQuestionSeries(
 
     if (granularity === "three_hour") bucketEnd.setUTCHours(bucketEnd.getUTCHours() + 3);
     else if (granularity === "week") bucketEnd.setUTCDate(bucketEnd.getUTCDate() + 7);
+    else if (granularity === "month") bucketEnd = addMonths(bucketEnd, 1);
     else bucketEnd.setUTCDate(bucketEnd.getUTCDate() + 1);
 
     if (bucketEnd > end) bucketEnd = new Date(end);
@@ -228,7 +259,9 @@ function buildQuestionSeries(
             )
           : granularity === "week"
             ? formatWeekLabel(buckets.length + 1, bucketStart, bucketEnd)
-            : formatSeriesLabel(
+            : granularity === "month"
+              ? formatMonthLabel(new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), 1)))
+              : formatSeriesLabel(
                 new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), cursor.getUTCDate())),
                 granularity
               ),
@@ -237,6 +270,7 @@ function buildQuestionSeries(
 
     if (granularity === "three_hour") cursor.setUTCHours(cursor.getUTCHours() + 3);
     else if (granularity === "week") cursor.setUTCDate(cursor.getUTCDate() + 7);
+    else if (granularity === "month") cursor.setUTCMonth(cursor.getUTCMonth() + 1, 1);
     else cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
 

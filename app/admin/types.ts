@@ -12,6 +12,11 @@ export type Range =
   | "custom";
 
 export type Overview = {
+  filter?: {
+    startDate: string;
+    endDate: string;
+    granularity: "three_hour" | "day" | "week" | "month";
+  };
   stats: {
     users: number;
     chats: number;

@@ -67,7 +67,7 @@ export function Dashboard({ overview, range }: { overview: Overview | null; rang
         <Stat label="Jawaban Bermasalah" value={stats.unanswered} />
       </section>
 
-      <QuestionChart range={range} series={overview?.questionSeries || []} />
+      <QuestionChart granularity={overview?.filter?.granularity} range={range} series={overview?.questionSeries || []} />
 
       <section className="panel">
         <div className="panel-head">
