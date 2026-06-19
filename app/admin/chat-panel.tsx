@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChatPair, ChatSession, PaginationInfo, Range } from "@/app/admin/types";
+import { ChatPair, ChatSession, PaginationInfo, Range, reportRangeOptions } from "@/app/admin/types";
 import { formatIndonesianDateTime, getContextItems } from "@/app/admin/utils";
 import { ContextDetailDialog, PaginationControls } from "@/app/admin/shared";
 
@@ -56,19 +56,11 @@ export function ChatPanel({
         <div className="report-row">
           <span className="report-label">Filter Riwayat Chat</span>
           <div className="report-pills">
-            {[
-              ["today", "Hari ini"],
-              ["yesterday", "Kemarin"],
-              ["this_week", "Minggu ini"],
-              ["last_week", "Minggu lalu"],
-              ["this_month", "Bulan ini"],
-              ["last_month", "Bulan lalu"],
-              ["custom", "Custom"]
-            ].map(([value, label]) => (
+            {reportRangeOptions.map(({ value, label }) => (
               <button
                 className={`report-pill ${range === value ? "active" : ""}`}
                 key={value}
-                onClick={() => setRange(value as Range)}
+                onClick={() => setRange(value)}
                 type="button"
               >
                 {label}

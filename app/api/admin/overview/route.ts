@@ -13,7 +13,16 @@ import {
   toStoredSqlTimestamp
 } from "@/lib/report-time";
 
-type RangeName = "today" | "yesterday" | "this_week" | "last_week" | "this_month" | "last_month" | "custom";
+type RangeName =
+  | "today"
+  | "yesterday"
+  | "this_week"
+  | "last_week"
+  | "this_month"
+  | "last_month"
+  | "this_year"
+  | "all"
+  | "custom";
 type Granularity = "three_hour" | "day" | "week";
 
 function pad(value: number) {
@@ -34,6 +43,8 @@ function getFilterFromUrl(url: string) {
     requestedRange === "last_week" ||
     requestedRange === "this_month" ||
     requestedRange === "last_month" ||
+    requestedRange === "this_year" ||
+    requestedRange === "all" ||
     requestedRange === "custom"
       ? requestedRange
       : "today";
@@ -66,6 +77,11 @@ function getFilterFromUrl(url: string) {
     }
   }
 
+  if (range === "this_year") {
+    start = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+    end = new Date(Date.UTC(now.getUTCFullYear() + 1, 0, 1));
+  }
+
   if (range === "custom") {
     const customStart = parseWibDateOnly(searchParams.get("startDate"));
     const customEnd = parseWibDateOnly(searchParams.get("endDate"));
@@ -77,7 +93,9 @@ function getFilterFromUrl(url: string) {
   const durationMs = end.getTime() - start.getTime();
   const durationDays = Math.ceil(durationMs / (24 * 60 * 60 * 1000));
   const granularity: Granularity =
-    durationMs <= 24 * 60 * 60 * 1000
+    range === "all"
+      ? "week"
+      : durationMs <= 24 * 60 * 60 * 1000
       ? "three_hour"
       : range === "this_month" || range === "last_month" || durationDays > 31
         ? "week"
@@ -88,6 +106,7 @@ function getFilterFromUrl(url: string) {
     start,
     end,
     granularity,
+    hasTimeFilter: range !== "all",
     startSql: toStoredSqlTimestamp(start),
     endSql: toStoredSqlTimestamp(end)
   };
@@ -235,6 +254,28 @@ function buildQuestionSeries(
   return buckets.map(({ label, count }) => ({ label, count }));
 }
 
+function getSeriesBounds(
+  questions: Array<{ raw: Record<string, unknown> }>,
+  timeColumn: string | undefined,
+  fallbackStart: Date,
+  fallbackEnd: Date
+) {
+  if (!timeColumn) return { start: fallbackStart, end: fallbackEnd };
+
+  const timestamps = questions
+    .map((question) => parseStoredTimestamp(question.raw[timeColumn]))
+    .filter((date): date is Date => Boolean(date));
+
+  if (!timestamps.length) return { start: fallbackStart, end: fallbackEnd };
+
+  const minDate = new Date(Math.min(...timestamps.map((date) => date.getTime())));
+  const maxDate = new Date(Math.max(...timestamps.map((date) => date.getTime())));
+  return {
+    start: startOfWibDay(minDate),
+    end: addDays(startOfWibDay(maxDate), 1)
+  };
+}
+
 export async function GET(request: Request) {
   if (!(await isAuthenticated())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -261,7 +302,7 @@ export async function GET(request: Request) {
         throw new Error("Tabel chat_history harus memiliki kolom session_id, question, dan answer.");
       }
 
-      const historyWhere = timeColumn
+      const historyWhere = timeColumn && filter.hasTimeFilter
         ? `where ${chatStartExpression} >= $1::${timeSqlCast} and ${chatStartExpression} < $2::${timeSqlCast}`
         : "";
       const timeParams = [startSql, endSql];
@@ -273,7 +314,7 @@ export async function GET(request: Request) {
             from ${historyInfo.table.sql} h
             ${historyWhere}
           `,
-          timeColumn ? timeParams : []
+          timeColumn && filter.hasTimeFilter ? timeParams : []
         ),
         client.query(
           `
@@ -285,7 +326,7 @@ export async function GET(request: Request) {
             ${timeColumn ? `order by ${chatStartExpression} asc` : idColumn ? `order by h.${quoteIdent(idColumn)} asc` : ""}
             limit 10000
           `,
-          timeColumn ? timeParams : []
+          timeColumn && filter.hasTimeFilter ? timeParams : []
         )
       ]);
 
@@ -296,7 +337,17 @@ export async function GET(request: Request) {
           return { raw };
         })
         .filter((item) => asText(item.raw[questionColumn]));
-      const questionSeries = buildQuestionSeries(questions, timeColumn, filter.start, filter.end, filter.granularity);
+      const seriesBounds =
+        filter.range === "all"
+          ? getSeriesBounds(questions, timeColumn, filter.start, filter.end)
+          : { start: filter.start, end: filter.end };
+      const questionSeries = buildQuestionSeries(
+        questions,
+        timeColumn,
+        seriesBounds.start,
+        seriesBounds.end,
+        filter.granularity
+      );
       const unansweredPattern = /\bmaaf\b/i;
       const unansweredPairs = questions
         .filter((item) =>

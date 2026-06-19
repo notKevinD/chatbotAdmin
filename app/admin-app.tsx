@@ -16,7 +16,8 @@ import {
   PAGE_SIZE,
   PaginationInfo,
   Range,
-  Tab
+  Tab,
+  reportRangeOptions
 } from "@/app/admin/types";
 import { fetchJson } from "@/app/admin/utils";
 
@@ -241,19 +242,11 @@ export default function AdminApp() {
             <div className="report-row">
               <span className="report-label">Periode laporan</span>
               <div className="report-pills">
-                {[
-                  ["today", "Hari ini"],
-                  ["yesterday", "Kemarin"],
-                  ["this_week", "Minggu ini"],
-                  ["last_week", "Minggu lalu"],
-                  ["this_month", "Bulan ini"],
-                  ["last_month", "Bulan lalu"],
-                  ["custom", "Custom"]
-                ].map(([value, label]) => (
+                {reportRangeOptions.map(({ value, label }) => (
                   <button
                     className={`report-pill ${range === value ? "active" : ""}`}
                     key={value}
-                    onClick={() => setRange(value as Range)}
+                    onClick={() => setRange(value)}
                     type="button"
                   >
                     {label}

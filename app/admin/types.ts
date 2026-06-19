@@ -7,6 +7,8 @@ export type Range =
   | "last_week"
   | "this_month"
   | "last_month"
+  | "this_year"
+  | "all"
   | "custom";
 
 export type Overview = {
@@ -116,5 +118,19 @@ export const rangeLabel: Record<Range, string> = {
   last_week: "Minggu Lalu",
   this_month: "Bulan Ini",
   last_month: "Bulan Lalu",
+  this_year: "Tahun Ini",
+  all: "Selamanya",
   custom: "Custom"
 };
+
+export const reportRangeOptions: Array<{ value: Range; label: string }> = [
+  { value: "today", label: "Hari ini" },
+  { value: "yesterday", label: "Kemarin" },
+  { value: "this_week", label: "Minggu ini" },
+  { value: "last_week", label: "Minggu lalu" },
+  { value: "this_month", label: "Bulan ini" },
+  { value: "last_month", label: "Bulan lalu" },
+  { value: "this_year", label: "Tahun ini" },
+  { value: "all", label: "Selamanya" },
+  { value: "custom", label: "Custom" }
+];

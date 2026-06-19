@@ -64,7 +64,7 @@ npm start
 2. Masukkan username dan password admin dari `.env.local`.
 3. Masuk ke dashboard untuk melihat ringkasan penggunaan chatbot.
 4. Pilih filter laporan:
-   `Hari ini`, `Kemarin`, `Minggu ini`, `Minggu lalu`, `Bulan ini`, `Bulan lalu`, atau `Custom`.
+   `Hari ini`, `Kemarin`, `Minggu ini`, `Minggu lalu`, `Bulan ini`, `Bulan lalu`, `Tahun ini`, `Selamanya`, atau `Custom`.
 5. Buka menu Data RAG untuk mengelola data knowledge base.
 6. Pilih file Excel.
 7. Sistem akan menampilkan preview Excel dalam pop-up, termasuk semua sheet jika file memiliki multisheet.

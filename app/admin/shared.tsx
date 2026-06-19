@@ -270,9 +270,11 @@ export function QuestionChart({
         ? "Grafik Pertanyaan per Hari"
         : range === "this_month" || range === "last_month"
           ? "Grafik Pertanyaan per Minggu"
-        : range === "custom"
-          ? "Grafik Pertanyaan Custom"
-          : "Grafik Pertanyaan per Tanggal";
+          : range === "this_year" || range === "all"
+            ? "Grafik Pertanyaan per Minggu"
+            : range === "custom"
+              ? "Grafik Pertanyaan Custom"
+              : "Grafik Pertanyaan per Tanggal";
 
   return (
     <section className="panel chart-panel">

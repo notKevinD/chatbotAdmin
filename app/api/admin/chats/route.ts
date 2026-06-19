@@ -13,7 +13,16 @@ import {
 } from "@/lib/report-time";
 import * as XLSX from "xlsx";
 
-type RangeName = "today" | "yesterday" | "this_week" | "last_week" | "this_month" | "last_month" | "custom";
+type RangeName =
+  | "today"
+  | "yesterday"
+  | "this_week"
+  | "last_week"
+  | "this_month"
+  | "last_month"
+  | "this_year"
+  | "all"
+  | "custom";
 
 function addDays(date: Date, days: number) {
   return addWibDays(date, days);
@@ -28,6 +37,8 @@ function getFilter(searchParams: URLSearchParams) {
     requestedRange === "last_week" ||
     requestedRange === "this_month" ||
     requestedRange === "last_month" ||
+    requestedRange === "this_year" ||
+    requestedRange === "all" ||
     requestedRange === "custom"
       ? requestedRange
       : "this_week";
@@ -60,6 +71,11 @@ function getFilter(searchParams: URLSearchParams) {
     }
   }
 
+  if (range === "this_year") {
+    start = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+    end = new Date(Date.UTC(now.getUTCFullYear() + 1, 0, 1));
+  }
+
   if (range === "custom") {
     const customStart = parseWibDateOnly(searchParams.get("startDate"));
     const customEnd = parseWibDateOnly(searchParams.get("endDate"));
@@ -72,6 +88,7 @@ function getFilter(searchParams: URLSearchParams) {
     range,
     start,
     end,
+    hasTimeFilter: range !== "all",
     startSql: toStoredSqlTimestamp(start),
     endSql: toStoredSqlTimestamp(end)
   };
@@ -321,7 +338,7 @@ export async function GET(request: Request) {
         const conditions: string[] = [];
         const params: unknown[] = [];
 
-        if (timeStartColumn) {
+        if (timeStartColumn && filter.hasTimeFilter) {
           params.push(startSql, endSql);
           conditions.push(
             `${chatStartExpression} >= $1::${timeSqlCast} and ${chatStartExpression} < $2::${timeSqlCast}`
@@ -438,7 +455,7 @@ export async function GET(request: Request) {
         const conditions: string[] = [];
         const params: unknown[] = [];
 
-        if (timeStartColumn) {
+        if (timeStartColumn && filter.hasTimeFilter) {
           params.push(startSql, endSql);
           conditions.push(
             `${chatStartExpression} >= $1::${timeSqlCast} and ${chatStartExpression} < $2::${timeSqlCast}`
@@ -510,7 +527,7 @@ export async function GET(request: Request) {
         const conditions: string[] = [];
         const params: unknown[] = [];
 
-        if (timeStartColumn && !includeAll) {
+        if (timeStartColumn && filter.hasTimeFilter && !includeAll) {
           params.push(startSql, endSql);
           conditions.push(
             `${chatStartExpression} >= $1::${timeSqlCast} and ${chatStartExpression} < $2::${timeSqlCast}`
@@ -587,7 +604,7 @@ export async function GET(request: Request) {
       const params: unknown[] = [session];
       conditions.push(`h.${quoteIdent(sessionColumn)}::text = $1::text`);
 
-      if (timeStartColumn && !includeAll) {
+      if (timeStartColumn && filter.hasTimeFilter && !includeAll) {
         params.push(startSql, endSql);
         conditions.push(
           `${chatStartExpression} >= $2::${timeSqlCast} and ${chatStartExpression} < $3::${timeSqlCast}`
