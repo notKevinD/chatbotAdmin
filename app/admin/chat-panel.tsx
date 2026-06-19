@@ -40,8 +40,8 @@ export function ChatPanel({
 }) {
   const [contextPair, setContextPair] = useState<ChatPair | null>(null);
 
-  function exportRagas() {
-    const params = new URLSearchParams({ export: "ragas", range });
+  function exportChatData(type: "ragas" | "data_leads") {
+    const params = new URLSearchParams({ export: type, range });
     if (search.trim()) params.set("q", search.trim());
     if (range === "custom") {
       if (customStartDate) params.set("startDate", customStartDate);
@@ -126,9 +126,21 @@ export function ChatPanel({
           >
             Hapus Filter
           </button>
-          <button className="button secondary" onClick={exportRagas} type="button">
-            Ekspor Data RAGAS
-          </button>
+          <select
+            className="select export-select"
+            defaultValue=""
+            onChange={(event) => {
+              const value = event.target.value as "ragas" | "data_leads" | "";
+              if (value) exportChatData(value);
+              event.target.value = "";
+            }}
+          >
+            <option value="" disabled>
+              Pilih ekspor
+            </option>
+            <option value="ragas">Ekspor RAGAS</option>
+            <option value="data_leads">Ekspor data leads</option>
+          </select>
         </div>
       </section>
 
@@ -144,10 +156,14 @@ export function ChatPanel({
               onClick={() => onSelect(session.sessionId, 1)}
               type="button"
             >
-              <span className="session-id">{session.sessionId}</span>
+              <span className="session-main">
+                <span className="session-title">{session.visitorName || "Tanpa nama"}</span>
+                <span className="session-id">{session.sessionId}</span>
+              </span>
               <span className="session-meta">
                 <span>{session.total} pertanyaan</span>
                 <span>{formatIndonesianDateTime(session.lastSeen)}</span>
+                {session.visitorSchoolOrigin ? <span>{session.visitorSchoolOrigin}</span> : null}
               </span>
             </button>
           ))}
@@ -161,6 +177,22 @@ export function ChatPanel({
           <h2>{selectedSession ? `Percakapan ${selectedSession}` : "Detail Percakapan"}</h2>
         </div>
         <div className="conversation-list">
+          {selectedSession && (pairs[0]?.visitorName || pairs[0]?.visitorPhoneNumber || pairs[0]?.visitorSchoolOrigin) ? (
+            <div className="lead-summary">
+              <div>
+                <span>Nama</span>
+                <strong>{pairs[0]?.visitorName || "-"}</strong>
+              </div>
+              <div>
+                <span>No. telepon</span>
+                <strong>{pairs[0]?.visitorPhoneNumber || "-"}</strong>
+              </div>
+              <div>
+                <span>Asal sekolah</span>
+                <strong>{pairs[0]?.visitorSchoolOrigin || "-"}</strong>
+              </div>
+            </div>
+          ) : null}
           {pairs.map((pair, index) => (
             <article className="conversation-card" key={`${pair.createdAt}-${index}`}>
               <div className="conversation-meta-line">
@@ -177,7 +209,7 @@ export function ChatPanel({
               </div>
               <div className="conversation-actions">
                 {pair.responseTimeMs != null ? (
-                  <span className="muted">Waktu respons: {Number(pair.responseTimeMs).toLocaleString("id-ID")} ms</span>
+                  <span className="muted">Waktu respons: {Number(pair.responseTimeMs).toLocaleString("id-ID")} </span>
                 ) : null}
                 {getContextItems(pair.context).length ? (
                   <button className="button secondary compact-button" onClick={() => setContextPair(pair)} type="button">

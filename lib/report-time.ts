@@ -1,8 +1,5 @@
 const REPORT_TIME_ZONE = "Asia/Jakarta";
-
-// Existing timestamp-without-time-zone values were written in UTC+8.
-// Treat them as one hour ahead of WIB until the database is normalized.
-const STORAGE_AHEAD_OF_WIB_HOURS = 1;
+const WIB_OFFSET_HOURS = 7;
 
 function pad(value: number) {
   return String(value).padStart(2, "0");
@@ -51,15 +48,28 @@ export function parseWibDateOnly(value: string | null) {
   return new Date(Date.UTC(year, month - 1, day));
 }
 
-export function toStoredSqlTimestamp(wibWallClock: Date) {
-  const storedClock = new Date(wibWallClock);
-  storedClock.setUTCHours(storedClock.getUTCHours() + STORAGE_AHEAD_OF_WIB_HOURS);
+function toWibInstant(wibWallClock: Date) {
+  const instant = new Date(wibWallClock);
+  instant.setUTCHours(instant.getUTCHours() - WIB_OFFSET_HOURS);
+  return instant;
+}
 
-  return `${storedClock.getUTCFullYear()}-${pad(storedClock.getUTCMonth() + 1)}-${pad(
-    storedClock.getUTCDate()
-  )} ${pad(storedClock.getUTCHours())}:${pad(storedClock.getUTCMinutes())}:${pad(
-    storedClock.getUTCSeconds()
+export function toStoredSqlTimestamp(wibWallClock: Date, columnType?: string) {
+  const normalizedColumnType = (columnType || "").toLowerCase();
+
+  if (normalizedColumnType === "timestamp with time zone") {
+    return toWibInstant(wibWallClock).toISOString();
+  }
+
+  return `${wibWallClock.getUTCFullYear()}-${pad(wibWallClock.getUTCMonth() + 1)}-${pad(
+    wibWallClock.getUTCDate()
+  )} ${pad(wibWallClock.getUTCHours())}:${pad(wibWallClock.getUTCMinutes())}:${pad(
+    wibWallClock.getUTCSeconds()
   )}`;
+}
+
+export function getTimestampSqlCast(columnType?: string) {
+  return (columnType || "").toLowerCase() === "timestamp with time zone" ? "timestamptz" : "timestamp";
 }
 
 export function formatWibDateOnly(wibWallClock: Date) {
@@ -70,6 +80,18 @@ export function formatWibDateOnly(wibWallClock: Date) {
 
 export function parseStoredTimestampAsWib(value: unknown) {
   const text = typeof value === "string" ? value : value == null ? "" : String(value);
+  const trimmed = text.trim();
+  const hasTimeZone = /(?:z|[+-]\d{2}(?::?\d{2})?)$/i.test(trimmed);
+
+  if (hasTimeZone) {
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) {
+      const wibDate = new Date(parsed);
+      wibDate.setUTCHours(wibDate.getUTCHours() + WIB_OFFSET_HOURS);
+      return wibDate;
+    }
+  }
+
   const match = text.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?/);
 
   if (!match) return null;
@@ -80,7 +102,7 @@ export function parseStoredTimestampAsWib(value: unknown) {
       Number(year),
       Number(month) - 1,
       Number(day),
-      Number(hour) - STORAGE_AHEAD_OF_WIB_HOURS,
+      Number(hour),
       Number(minute),
       Number(second)
     )

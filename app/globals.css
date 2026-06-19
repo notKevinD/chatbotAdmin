@@ -624,6 +624,9 @@ button {
 }
 
 .report-actions {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
   display: flex;
   justify-content: flex-end;
 }
@@ -755,6 +758,12 @@ button {
   min-height: 40px;
   min-width: 260px;
   padding: 8px 12px;
+}
+
+.export-select {
+  min-height: 44px;
+  min-width: 190px;
+  width: auto;
 }
 
 .top-list {
@@ -1138,6 +1147,19 @@ tbody tr:hover {
   overflow-wrap: anywhere;
 }
 
+.session-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.session-title {
+  color: #172033;
+  font-size: 15px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
 .session-meta {
   color: var(--muted);
   display: flex;
@@ -1153,6 +1175,35 @@ tbody tr:hover {
   display: grid;
   gap: 16px;
   padding: 18px;
+}
+
+.lead-summary {
+  background: rgba(248, 251, 255, 0.78);
+  border: 1px solid rgba(112, 132, 162, 0.2);
+  border-radius: 10px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 14px 16px;
+}
+
+.lead-summary div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.lead-summary span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.lead-summary strong {
+  color: #172033;
+  font-size: 15px;
+  overflow-wrap: anywhere;
 }
 
 .conversation-card {
@@ -1336,9 +1387,16 @@ tbody tr:hover {
 
   .report-row,
   .preview-actions,
-  .custom-date-panel {
+  .custom-date-panel,
+  .report-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .search-input,
+  .export-select {
+    min-width: 0;
+    width: 100%;
   }
 
   .preview-buttons {
@@ -1366,6 +1424,10 @@ tbody tr:hover {
   }
 
   .session-card {
+    grid-template-columns: 1fr;
+  }
+
+  .lead-summary {
     grid-template-columns: 1fr;
   }
 

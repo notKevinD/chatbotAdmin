@@ -6,6 +6,7 @@ import {
   addWibDays,
   formatWibDateOnly,
   getCurrentWibWallClock,
+  getTimestampSqlCast,
   parseStoredTimestampAsWib,
   parseWibDateOnly,
   startOfWibDay,
@@ -90,6 +91,39 @@ function getFilterFromUrl(url: string) {
     startSql: toStoredSqlTimestamp(start),
     endSql: toStoredSqlTimestamp(end)
   };
+}
+
+function getColumnType(columns: Array<{ column_name: string; data_type: string }>, columnName?: string) {
+  return columns.find((column) => column.column_name === columnName)?.data_type;
+}
+
+function canNormalizeWebhookUtcStart(timeStartColumnType?: string, timeEndColumnType?: string) {
+  return (
+    (timeStartColumnType || "").toLowerCase() === "timestamp without time zone" &&
+    (timeEndColumnType || "").toLowerCase() === "timestamp without time zone"
+  );
+}
+
+function getChatStartExpression(
+  timeStartColumn: string | undefined,
+  timeEndColumn: string | undefined,
+  timeStartColumnType?: string,
+  timeEndColumnType?: string
+) {
+  if (!timeStartColumn) return "null";
+
+  const startExpression = `h.${quoteIdent(timeStartColumn)}`;
+  if (!timeEndColumn || !canNormalizeWebhookUtcStart(timeStartColumnType, timeEndColumnType)) {
+    return startExpression;
+  }
+
+  const endExpression = `h.${quoteIdent(timeEndColumn)}`;
+  return `case
+    when ${endExpression} is not null
+      and extract(epoch from (${endExpression} - ${startExpression})) between 21600 and 28800
+    then ${startExpression} + interval '7 hours'
+    else ${startExpression}
+  end`;
 }
 
 function parseStoredTimestamp(value: unknown) {
@@ -213,17 +247,24 @@ export async function GET(request: Request) {
       const questionColumn = pickColumn(historyInfo.columns, ["question"]);
       const answerColumn = pickColumn(historyInfo.columns, ["answer"]);
       const timeColumn = pickColumn(historyInfo.columns, ["time_start", "started_at", "created_at"]);
+      const timeEndColumn = pickColumn(historyInfo.columns, ["time_end", "ended_at", "completed_at"]);
       const idColumn = pickColumn(historyInfo.columns, ["id"]);
       const fallbackColumn = pickColumn(historyInfo.columns, ["isfallback", "isFallback", "is_fallback"]);
+      const timeColumnType = getColumnType(historyInfo.columns, timeColumn);
+      const timeEndColumnType = getColumnType(historyInfo.columns, timeEndColumn);
+      const timeSqlCast = getTimestampSqlCast(timeColumnType);
+      const startSql = toStoredSqlTimestamp(filter.start, timeColumnType);
+      const endSql = toStoredSqlTimestamp(filter.end, timeColumnType);
+      const chatStartExpression = getChatStartExpression(timeColumn, timeEndColumn, timeColumnType, timeEndColumnType);
 
       if (!sessionColumn || !questionColumn || !answerColumn) {
         throw new Error("Tabel chat_history harus memiliki kolom session_id, question, dan answer.");
       }
 
       const historyWhere = timeColumn
-        ? `where h.${quoteIdent(timeColumn)} >= $1::timestamp and h.${quoteIdent(timeColumn)} < $2::timestamp`
+        ? `where ${chatStartExpression} >= $1::${timeSqlCast} and ${chatStartExpression} < $2::${timeSqlCast}`
         : "";
-      const timeParams = [filter.startSql, filter.endSql];
+      const timeParams = [startSql, endSql];
 
       const [sessionCount, rawHistory] = await Promise.all([
         client.query<{ count: number }>(
@@ -236,10 +277,12 @@ export async function GET(request: Request) {
         ),
         client.query(
           `
-            select ${rowsToJsonExpression("h", historyInfo.columns)} as row
+            select
+              ${rowsToJsonExpression("h", historyInfo.columns)} as row,
+              ${timeColumn ? `(${chatStartExpression})::text` : "null"} as "normalizedTime"
             from ${historyInfo.table.sql} h
             ${historyWhere}
-            ${timeColumn ? `order by h.${quoteIdent(timeColumn)} asc` : idColumn ? `order by h.${quoteIdent(idColumn)} asc` : ""}
+            ${timeColumn ? `order by ${chatStartExpression} asc` : idColumn ? `order by h.${quoteIdent(idColumn)} asc` : ""}
             limit 10000
           `,
           timeColumn ? timeParams : []
@@ -247,7 +290,11 @@ export async function GET(request: Request) {
       ]);
 
       const questions = rawHistory.rows
-        .map((item) => ({ raw: item.row as Record<string, unknown> }))
+        .map((item) => {
+          const raw = item.row as Record<string, unknown>;
+          if (timeColumn && item.normalizedTime) raw[timeColumn] = item.normalizedTime;
+          return { raw };
+        })
         .filter((item) => asText(item.raw[questionColumn]));
       const questionSeries = buildQuestionSeries(questions, timeColumn, filter.start, filter.end, filter.granularity);
       const unansweredPattern = /\bmaaf\b/i;

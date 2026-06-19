@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
+import type { PoolClient } from "pg";
 import { getCurrentAdmin } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { formatDbError, getColumns, pickColumn, quoteIdent, withClient } from "@/lib/db";
 import {
   addWibDays,
   getCurrentWibWallClock,
+  getTimestampSqlCast,
   parseWibDateOnly,
   startOfWibDay,
   toStoredSqlTimestamp
@@ -68,36 +70,178 @@ function getFilter(searchParams: URLSearchParams) {
 
   return {
     range,
+    start,
+    end,
     startSql: toStoredSqlTimestamp(start),
     endSql: toStoredSqlTimestamp(end)
   };
 }
 
-function toExcelBuffer(rows: Array<Record<string, unknown>>) {
-  const worksheet = XLSX.utils.json_to_sheet(rows, {
-    header: [
-      "id",
-      "session_id",
-      "question",
-      "answer",
-      "context",
-      "reference",
-      "response_time_ms",
-      "created_at"
-    ]
-  });
-  worksheet["!cols"] = [
-    { wch: 10 },
-    { wch: 38 },
-    { wch: 52 },
-    { wch: 64 },
-    { wch: 100 },
-    { wch: 64 },
-    { wch: 20 },
-    { wch: 24 }
+function getColumnType(columns: Array<{ column_name: string; data_type: string }>, columnName?: string) {
+  return columns.find((column) => column.column_name === columnName)?.data_type;
+}
+
+function canNormalizeWebhookUtcStart(timeStartColumnType?: string, timeEndColumnType?: string) {
+  return (
+    (timeStartColumnType || "").toLowerCase() === "timestamp without time zone" &&
+    (timeEndColumnType || "").toLowerCase() === "timestamp without time zone"
+  );
+}
+
+async function getOptionalColumns(client: PoolClient, tableName: string) {
+  try {
+    return await getColumns(client, tableName);
+  } catch {
+    return null;
+  }
+}
+
+async function getChatSessionInfo(client: PoolClient) {
+  const info = await getOptionalColumns(client, "chat_sessions");
+  if (!info) return null;
+
+  const sessionColumn = pickColumn(info.columns, ["session_id", "sessionId"]);
+  if (!sessionColumn) return null;
+
+  return {
+    info,
+    sessionColumn,
+    visitorNameColumn: pickColumn(info.columns, ["visitor_name", "visitorName", "name"]),
+    visitorPhoneColumn: pickColumn(info.columns, [
+      "visitor_phone_number",
+      "visitorPhoneNumber",
+      "phone_number",
+      "phone",
+      "nomor_telepon",
+      "no_telp"
+    ]),
+    visitorSchoolColumn: pickColumn(info.columns, [
+      "visitor_school_origin",
+      "visitorSchoolOrigin",
+      "school_origin",
+      "school",
+      "asal_sekolah"
+    ]),
+    createdAtColumn: pickColumn(info.columns, ["created_at", "createdAt"]),
+    lastUsedAtColumn: pickColumn(info.columns, ["last_used_at", "lastUsedAt", "updated_at"])
+  };
+}
+
+function chatSessionLateralSql(
+  chatSessionInfo: Awaited<ReturnType<typeof getChatSessionInfo>>,
+  historySessionColumn: string
+) {
+  if (!chatSessionInfo) return "";
+
+  const selectItems = [
+    `${quoteIdent(chatSessionInfo.sessionColumn)}::text as session_id`,
+    chatSessionInfo.visitorNameColumn
+      ? `${quoteIdent(chatSessionInfo.visitorNameColumn)}::text as visitor_name`
+      : "null::text as visitor_name",
+    chatSessionInfo.visitorPhoneColumn
+      ? `${quoteIdent(chatSessionInfo.visitorPhoneColumn)}::text as visitor_phone_number`
+      : "null::text as visitor_phone_number",
+    chatSessionInfo.visitorSchoolColumn
+      ? `${quoteIdent(chatSessionInfo.visitorSchoolColumn)}::text as visitor_school_origin`
+      : "null::text as visitor_school_origin",
+    chatSessionInfo.createdAtColumn
+      ? `${quoteIdent(chatSessionInfo.createdAtColumn)}::text as session_created_at`
+      : "null::text as session_created_at",
+    chatSessionInfo.lastUsedAtColumn
+      ? `${quoteIdent(chatSessionInfo.lastUsedAtColumn)}::text as session_last_used_at`
+      : "null::text as session_last_used_at"
   ];
+  const orderSql = chatSessionInfo.lastUsedAtColumn
+    ? `${quoteIdent(chatSessionInfo.lastUsedAtColumn)} desc nulls last`
+    : chatSessionInfo.createdAtColumn
+      ? `${quoteIdent(chatSessionInfo.createdAtColumn)} desc nulls last`
+      : quoteIdent(chatSessionInfo.sessionColumn);
+
+  return `
+    left join lateral (
+      select ${selectItems.join(", ")}
+      from ${chatSessionInfo.info.table.sql} s
+      where s.${quoteIdent(chatSessionInfo.sessionColumn)}::text = h.${quoteIdent(historySessionColumn)}::text
+      order by ${orderSql}
+      limit 1
+    ) cs on true
+  `;
+}
+
+function getChatStartExpression(
+  timeStartColumn: string | undefined,
+  timeEndColumn: string | undefined,
+  timeStartColumnType?: string,
+  timeEndColumnType?: string
+) {
+  if (!timeStartColumn) return "null";
+
+  const startExpression = `h.${quoteIdent(timeStartColumn)}`;
+  if (!timeEndColumn || !canNormalizeWebhookUtcStart(timeStartColumnType, timeEndColumnType)) {
+    return startExpression;
+  }
+
+  const endExpression = `h.${quoteIdent(timeEndColumn)}`;
+  return `case
+    when ${endExpression} is not null
+      and extract(epoch from (${endExpression} - ${startExpression})) between 21600 and 28800
+    then ${startExpression} + interval '7 hours'
+    else ${startExpression}
+  end`;
+}
+
+function toExcelBuffer(rows: Array<Record<string, unknown>>, type: "ragas" | "data_leads") {
+  const header =
+    type === "data_leads"
+      ? [
+          "session_id",
+          "visitor_name",
+          "visitor_phone_number",
+          "visitor_school_origin",
+          "total_questions",
+          "first_chat_at",
+          "last_chat_at",
+          "session_created_at",
+          "session_last_used_at"
+        ]
+      : [
+          "id",
+          "session_id",
+          "question",
+          "answer",
+          "context",
+          "reference",
+          "response_time_ms",
+          "created_at"
+        ];
+  const worksheet = XLSX.utils.json_to_sheet(rows, {
+    header
+  });
+  worksheet["!cols"] =
+    type === "data_leads"
+      ? [
+          { wch: 38 },
+          { wch: 28 },
+          { wch: 22 },
+          { wch: 34 },
+          { wch: 16 },
+          { wch: 24 },
+          { wch: 24 },
+          { wch: 24 },
+          { wch: 24 }
+        ]
+      : [
+          { wch: 10 },
+          { wch: 38 },
+          { wch: 52 },
+          { wch: 64 },
+          { wch: 100 },
+          { wch: 64 },
+          { wch: 20 },
+          { wch: 24 }
+        ];
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, worksheet, "RAGAS Export");
+  XLSX.utils.book_append_sheet(workbook, worksheet, type === "data_leads" ? "Data Leads" : "RAGAS Export");
   return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
 }
 
@@ -156,6 +300,17 @@ export async function GET(request: Request) {
         const contextColumn = pickColumn(historyInfo.columns, ["context"]);
         const timeStartColumn = pickColumn(historyInfo.columns, ["time_start", "started_at", "created_at"]);
         const timeEndColumn = pickColumn(historyInfo.columns, ["time_end", "ended_at", "completed_at"]);
+        const timeStartColumnType = getColumnType(historyInfo.columns, timeStartColumn);
+        const timeEndColumnType = getColumnType(historyInfo.columns, timeEndColumn);
+        const timeSqlCast = getTimestampSqlCast(timeStartColumnType);
+        const startSql = toStoredSqlTimestamp(filter.start, timeStartColumnType);
+        const endSql = toStoredSqlTimestamp(filter.end, timeStartColumnType);
+        const chatStartExpression = getChatStartExpression(
+          timeStartColumn,
+          timeEndColumn,
+          timeStartColumnType,
+          timeEndColumnType
+        );
 
         if (!sessionColumn || !questionColumn || !answerColumn || !contextColumn) {
           throw new Error(
@@ -167,9 +322,9 @@ export async function GET(request: Request) {
         const params: unknown[] = [];
 
         if (timeStartColumn) {
-          params.push(filter.startSql, filter.endSql);
+          params.push(startSql, endSql);
           conditions.push(
-            `h.${quoteIdent(timeStartColumn)} >= $1::timestamp and h.${quoteIdent(timeStartColumn)} < $2::timestamp`
+            `${chatStartExpression} >= $1::${timeSqlCast} and ${chatStartExpression} < $2::${timeSqlCast}`
           );
         }
 
@@ -187,7 +342,7 @@ export async function GET(request: Request) {
         const responseTimeExpression =
           timeStartColumn && timeEndColumn
             ? `greatest(
-                round(extract(epoch from (h.${quoteIdent(timeEndColumn)} - h.${quoteIdent(timeStartColumn)})) * 1000)::bigint,
+                round(extract(epoch from (h.${quoteIdent(timeEndColumn)} - (${chatStartExpression}))) * 1000)::bigint,
                 0
               )`
             : "null";
@@ -208,10 +363,10 @@ export async function GET(request: Request) {
               h.${quoteIdent(answerColumn)}::text as answer,
               h.${quoteIdent(contextColumn)} as context,
               ${responseTimeExpression} as response_time_ms,
-              ${timeStartColumn ? `h.${quoteIdent(timeStartColumn)}::text` : "null"} as created_at
+              ${timeStartColumn ? `(${chatStartExpression})::text` : "null"} as created_at
             from ${historyInfo.table.sql} h
             ${conditions.length ? `where ${conditions.join(" and ")}` : ""}
-            order by ${timeStartColumn ? `h.${quoteIdent(timeStartColumn)}` : idColumn ? `h.${quoteIdent(idColumn)}` : "1"} asc
+            order by ${timeStartColumn ? chatStartExpression : idColumn ? `h.${quoteIdent(idColumn)}` : "1"} asc
             limit 10000
           `,
           params
@@ -225,6 +380,7 @@ export async function GET(request: Request) {
         });
 
         return {
+          exportType: "ragas" as const,
           exportRows: result.rows.map((row) => ({
             id: row.id ?? "",
             session_id: row.session_id,
@@ -247,6 +403,18 @@ export async function GET(request: Request) {
       const timeStartColumn = pickColumn(historyInfo.columns, ["time_start", "started_at", "created_at"]);
       const timeEndColumn = pickColumn(historyInfo.columns, ["time_end", "ended_at", "completed_at"]);
       const fallbackColumn = pickColumn(historyInfo.columns, ["isfallback", "isFallback", "is_fallback"]);
+      const timeStartColumnType = getColumnType(historyInfo.columns, timeStartColumn);
+      const timeEndColumnType = getColumnType(historyInfo.columns, timeEndColumn);
+      const timeSqlCast = getTimestampSqlCast(timeStartColumnType);
+      const startSql = toStoredSqlTimestamp(filter.start, timeStartColumnType);
+      const endSql = toStoredSqlTimestamp(filter.end, timeStartColumnType);
+      const chatStartExpression = getChatStartExpression(
+        timeStartColumn,
+        timeEndColumn,
+        timeStartColumnType,
+        timeEndColumnType
+      );
+      const chatSessionInfo = await getChatSessionInfo(client);
 
       if (!sessionColumn || !questionColumn || !answerColumn) {
         throw new Error("Tabel chat_history harus memiliki kolom session_id, question, dan answer.");
@@ -256,17 +424,96 @@ export async function GET(request: Request) {
         `h.${quoteIdent(sessionColumn)}::text`,
         `h.${quoteIdent(questionColumn)}::text`,
         `h.${quoteIdent(answerColumn)}::text`,
-        contextColumn ? `h.${quoteIdent(contextColumn)}::text` : ""
+        contextColumn ? `h.${quoteIdent(contextColumn)}::text` : "",
+        chatSessionInfo?.visitorNameColumn ? `cs.visitor_name` : "",
+        chatSessionInfo?.visitorPhoneColumn ? `cs.visitor_phone_number` : "",
+        chatSessionInfo?.visitorSchoolColumn ? `cs.visitor_school_origin` : ""
       ].filter(Boolean);
+
+      if (exportType === "data_leads") {
+        if (!chatSessionInfo) {
+          throw new Error("Tabel chat_sessions dengan kolom session_id belum tersedia untuk ekspor data leads.");
+        }
+
+        const conditions: string[] = [];
+        const params: unknown[] = [];
+
+        if (timeStartColumn) {
+          params.push(startSql, endSql);
+          conditions.push(
+            `${chatStartExpression} >= $1::${timeSqlCast} and ${chatStartExpression} < $2::${timeSqlCast}`
+          );
+        }
+
+        if (search) {
+          params.push(`%${search}%`);
+          const searchParam = `$${params.length}`;
+          conditions.push(`(${searchableColumns.map((column) => `${column} ilike ${searchParam}::text`).join(" or ")})`);
+        }
+
+        const leadResult = await client.query<{
+          session_id: string;
+          visitor_name?: string;
+          visitor_phone_number?: string;
+          visitor_school_origin?: string;
+          total_questions: number;
+          first_chat_at?: string;
+          last_chat_at?: string;
+          session_created_at?: string;
+          session_last_used_at?: string;
+        }>(
+          `
+            select
+              h.${quoteIdent(sessionColumn)}::text as session_id,
+              max(cs.visitor_name) as visitor_name,
+              max(cs.visitor_phone_number) as visitor_phone_number,
+              max(cs.visitor_school_origin) as visitor_school_origin,
+              count(*)::int as total_questions,
+              ${timeStartColumn ? `min(${chatStartExpression})::text` : "null"} as first_chat_at,
+              ${timeStartColumn ? `max(${chatStartExpression})::text` : "null"} as last_chat_at,
+              max(cs.session_created_at) as session_created_at,
+              max(cs.session_last_used_at) as session_last_used_at
+            from ${historyInfo.table.sql} h
+            ${chatSessionLateralSql(chatSessionInfo, sessionColumn)}
+            ${conditions.length ? `where ${conditions.join(" and ")}` : ""}
+            group by h.${quoteIdent(sessionColumn)}
+            order by ${timeStartColumn ? `max(${chatStartExpression}) desc nulls last` : "session_id"}
+            limit 10000
+          `,
+          params
+        );
+
+        await writeAuditLog({
+          request,
+          userId: admin.id,
+          action: "export_chat_data_leads",
+          detail: { range: filter.range, search, total: leadResult.rows.length }
+        });
+
+        return {
+          exportType: "data_leads" as const,
+          exportRows: leadResult.rows.map((row) => ({
+            session_id: row.session_id,
+            visitor_name: row.visitor_name || "",
+            visitor_phone_number: row.visitor_phone_number || "",
+            visitor_school_origin: row.visitor_school_origin || "",
+            total_questions: row.total_questions,
+            first_chat_at: row.first_chat_at || "",
+            last_chat_at: row.last_chat_at || "",
+            session_created_at: row.session_created_at || "",
+            session_last_used_at: row.session_last_used_at || ""
+          }))
+        };
+      }
 
       if (!session) {
         const conditions: string[] = [];
         const params: unknown[] = [];
 
         if (timeStartColumn && !includeAll) {
-          params.push(filter.startSql, filter.endSql);
+          params.push(startSql, endSql);
           conditions.push(
-            `h.${quoteIdent(timeStartColumn)} >= $1::timestamp and h.${quoteIdent(timeStartColumn)} < $2::timestamp`
+            `${chatStartExpression} >= $1::${timeSqlCast} and ${chatStartExpression} < $2::${timeSqlCast}`
           );
         }
 
@@ -280,12 +527,12 @@ export async function GET(request: Request) {
         const limitParam = params.length + 1;
         const offsetParam = params.length + 2;
         const lastSeenExpression = timeStartColumn
-          ? `max(h.${quoteIdent(timeStartColumn)})::text`
+          ? `max(${chatStartExpression})::text`
           : idColumn
             ? `max(h.${quoteIdent(idColumn)})::text`
             : "null";
         const orderExpression = timeStartColumn
-          ? `max(h.${quoteIdent(timeStartColumn)}) desc nulls last`
+          ? `max(${chatStartExpression}) desc nulls last`
           : idColumn
             ? `max(h.${quoteIdent(idColumn)}) desc`
             : `"sessionId"`;
@@ -297,6 +544,7 @@ export async function GET(request: Request) {
               from (
                 select h.${quoteIdent(sessionColumn)}
                 from ${historyInfo.table.sql} h
+                ${chatSessionLateralSql(chatSessionInfo, sessionColumn)}
                 ${whereSql}
                 group by h.${quoteIdent(sessionColumn)}
               ) filtered_sessions
@@ -308,8 +556,12 @@ export async function GET(request: Request) {
               select
                 h.${quoteIdent(sessionColumn)}::text as "sessionId",
                 count(*)::int as total,
-                ${lastSeenExpression} as "lastSeen"
+                ${lastSeenExpression} as "lastSeen",
+                ${chatSessionInfo ? "max(cs.visitor_name)" : "null"} as "visitorName",
+                ${chatSessionInfo ? "max(cs.visitor_phone_number)" : "null"} as "visitorPhoneNumber",
+                ${chatSessionInfo ? "max(cs.visitor_school_origin)" : "null"} as "visitorSchoolOrigin"
               from ${historyInfo.table.sql} h
+              ${chatSessionLateralSql(chatSessionInfo, sessionColumn)}
               ${whereSql}
               group by h.${quoteIdent(sessionColumn)}
               order by ${orderExpression}
@@ -336,9 +588,9 @@ export async function GET(request: Request) {
       conditions.push(`h.${quoteIdent(sessionColumn)}::text = $1::text`);
 
       if (timeStartColumn && !includeAll) {
-        params.push(filter.startSql, filter.endSql);
+        params.push(startSql, endSql);
         conditions.push(
-          `h.${quoteIdent(timeStartColumn)} >= $2::timestamp and h.${quoteIdent(timeStartColumn)} < $3::timestamp`
+          `${chatStartExpression} >= $2::${timeSqlCast} and ${chatStartExpression} < $3::${timeSqlCast}`
         );
       }
 
@@ -350,7 +602,12 @@ export async function GET(request: Request) {
 
       const whereSql = `where ${conditions.join(" and ")}`;
       const countResult = await client.query<{ total: number }>(
-        `select count(*)::int as total from ${historyInfo.table.sql} h ${whereSql}`,
+        `
+          select count(*)::int as total
+          from ${historyInfo.table.sql} h
+          ${chatSessionLateralSql(chatSessionInfo, sessionColumn)}
+          ${whereSql}
+        `,
         params
       );
       const total = countResult.rows[0]?.total || 0;
@@ -359,7 +616,7 @@ export async function GET(request: Request) {
       const responseTimeExpression =
         timeStartColumn && timeEndColumn
           ? `greatest(
-              round(extract(epoch from (h.${quoteIdent(timeEndColumn)} - h.${quoteIdent(timeStartColumn)})) * 1000)::bigint,
+              round(extract(epoch from (h.${quoteIdent(timeEndColumn)} - (${chatStartExpression}))))::bigint,
               0
             )`
           : "null";
@@ -373,6 +630,9 @@ export async function GET(request: Request) {
         createdAt?: string;
         responseTimeMs?: number;
         isFallback?: boolean;
+        visitorName?: string;
+        visitorPhoneNumber?: string;
+        visitorSchoolOrigin?: string;
       }>(
         `
           select
@@ -381,14 +641,18 @@ export async function GET(request: Request) {
             h.${quoteIdent(questionColumn)}::text as question,
             h.${quoteIdent(answerColumn)}::text as answer,
             ${contextColumn ? `h.${quoteIdent(contextColumn)}` : "'[]'::jsonb"} as context,
-            ${timeStartColumn ? `h.${quoteIdent(timeStartColumn)}::text` : "null"} as "createdAt",
+            ${timeStartColumn ? `(${chatStartExpression})::text` : "null"} as "createdAt",
             ${responseTimeExpression} as "responseTimeMs",
-            ${fallbackColumn ? `coalesce(h.${quoteIdent(fallbackColumn)}, false)` : "false"} as "isFallback"
+            ${fallbackColumn ? `coalesce(h.${quoteIdent(fallbackColumn)}, false)` : "false"} as "isFallback",
+            ${chatSessionInfo ? "cs.visitor_name" : "null"} as "visitorName",
+            ${chatSessionInfo ? "cs.visitor_phone_number" : "null"} as "visitorPhoneNumber",
+            ${chatSessionInfo ? "cs.visitor_school_origin" : "null"} as "visitorSchoolOrigin"
           from ${historyInfo.table.sql} h
+          ${chatSessionLateralSql(chatSessionInfo, sessionColumn)}
           ${whereSql}
           order by ${
             timeStartColumn
-              ? `h.${quoteIdent(timeStartColumn)} asc`
+              ? `${chatStartExpression} asc`
               : idColumn
                 ? `h.${quoteIdent(idColumn)} asc`
                 : `h.${quoteIdent(sessionColumn)} asc`
@@ -411,11 +675,16 @@ export async function GET(request: Request) {
     });
 
     if ("exportRows" in data && Array.isArray(data.exportRows)) {
-      const excelBuffer = toExcelBuffer(data.exportRows);
+      const exportKind = data.exportType === "data_leads" ? "data_leads" : "ragas";
+      const excelBuffer = toExcelBuffer(data.exportRows, exportKind);
+      const filename =
+        exportKind === "data_leads"
+          ? `data-leads-export-${filter.range}.xlsx`
+          : `ragas-data-export-${filter.range}.xlsx`;
       return new NextResponse(new Uint8Array(excelBuffer), {
         headers: {
           "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "Content-Disposition": `attachment; filename="ragas-data-export-${filter.range}.xlsx"`
+          "Content-Disposition": `attachment; filename="${filename}"`
         }
       });
     }

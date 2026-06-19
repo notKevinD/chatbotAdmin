@@ -1,23 +1,14 @@
 export function formatIndonesianDateTime(value?: string) {
   if (!value) return "-";
 
+  const trimmed = value.trim();
+  const hasTimeZone = /(?:z|[+-]\d{2}(?::?\d{2})?)$/i.test(trimmed);
   const match = value.match(
     /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?/
   );
 
   if (!match) return value;
 
-  const [, year, month, day, hour, minute, second = "0"] = match;
-  const wibDate = new Date(
-    Date.UTC(
-      Number(year),
-      Number(month) - 1,
-      Number(day),
-      Number(hour) - 1,
-      Number(minute),
-      Number(second)
-    )
-  );
   const days = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
   const months = [
     "Januari",
@@ -34,6 +25,47 @@ export function formatIndonesianDateTime(value?: string) {
     "Desember"
   ];
   const twoDigit = (item: number) => String(item).padStart(2, "0");
+  let wibDate: Date;
+
+  if (hasTimeZone) {
+    const parsed = new Date(trimmed);
+    if (Number.isNaN(parsed.getTime())) return value;
+
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Jakarta",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23"
+    }).formatToParts(parsed);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+    wibDate = new Date(
+      Date.UTC(
+        Number(values.year),
+        Number(values.month) - 1,
+        Number(values.day),
+        Number(values.hour),
+        Number(values.minute),
+        Number(values.second)
+      )
+    );
+  } else {
+    const [, year, month, day, hour, minute, second = "0"] = match;
+    wibDate = new Date(
+      Date.UTC(
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hour),
+        Number(minute),
+        Number(second)
+      )
+    );
+  }
 
   return `${days[wibDate.getUTCDay()]}, ${twoDigit(wibDate.getUTCDate())} ${
     months[wibDate.getUTCMonth()]

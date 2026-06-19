@@ -56,6 +56,9 @@ export type ChatSession = {
   sessionId: string;
   total: number;
   lastSeen?: string;
+  visitorName?: string;
+  visitorPhoneNumber?: string;
+  visitorSchoolOrigin?: string;
 };
 
 export type ChatPair = {
@@ -67,6 +70,9 @@ export type ChatPair = {
   responseTimeMs?: number | string | null;
   isFallback?: boolean;
   createdAt?: string;
+  visitorName?: string;
+  visitorPhoneNumber?: string;
+  visitorSchoolOrigin?: string;
 };
 
 export type PaginationInfo = {
