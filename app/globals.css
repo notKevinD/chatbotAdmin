@@ -691,6 +691,12 @@ button {
   overflow: hidden;
 }
 
+.table-wrap {
+  background: var(--panel-solid);
+  border-color: rgba(112, 132, 162, 0.28);
+  border-radius: 8px;
+}
+
 .stat {
   padding: 22px;
   position: relative;
@@ -740,8 +746,8 @@ button {
 }
 
 .table-title {
-  background: rgba(255, 255, 255, 0.56);
-  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+  border-bottom: 1px solid rgba(112, 132, 162, 0.26);
   margin: 0;
   padding: 18px 20px;
 }
@@ -887,6 +893,7 @@ button {
 }
 
 .table-scroll {
+  background: #ffffff;
   overflow-x: auto;
 }
 
@@ -915,33 +922,54 @@ button {
 }
 
 table {
-  border-collapse: collapse;
+  background: #ffffff;
+  border-collapse: separate;
+  border-spacing: 0;
   min-width: 820px;
   width: 100%;
 }
 
 thead {
-  background: rgba(241, 245, 249, 0.84);
+  background: #f3f6f9;
 }
 
 th,
 td {
-  border-top: 1px solid rgba(112, 132, 162, 0.16);
-  padding: 14px 16px;
+  border-bottom: 1px solid rgba(112, 132, 162, 0.2);
+  border-right: 1px solid rgba(112, 132, 162, 0.18);
+  padding: 13px 16px;
   text-align: left;
   vertical-align: middle;
 }
 
+th:first-child,
+td:first-child {
+  border-left: 0;
+}
+
+th:last-child,
+td:last-child {
+  border-right: 0;
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
 th {
-  color: #44536a;
-  font-size: 13px;
-  font-weight: 850;
+  border-bottom-color: rgba(112, 132, 162, 0.28);
+  color: #344055;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
 td {
   color: #172033;
   font-size: 14px;
+  line-height: 1.45;
 }
 
 .actions-col,
@@ -969,7 +997,7 @@ tbody tr {
 }
 
 tbody tr:hover {
-  background: rgba(14, 165, 183, 0.055);
+  background: rgba(14, 165, 183, 0.045);
 }
 
 .mono {
