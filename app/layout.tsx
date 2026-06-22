@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AI Agent Chatbot Admin",
-  description: "Admin panel untuk pengelolaan RAG, chat memory, dan analitik chatbot n8n."
+  title: "Admin Chatbot PMB | UBL",
+  description: "Panel administrasi chatbot PMB Universitas Bandar Lampung."
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

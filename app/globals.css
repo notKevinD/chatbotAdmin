@@ -1,21 +1,21 @@
 :root {
   color-scheme: light;
-  --bg: #eef3f8;
-  --bg-grid: rgba(23, 37, 84, 0.06);
-  --panel: rgba(255, 255, 255, 0.78);
+  --bg: #f5f7fb;
+  --bg-grid: rgba(12, 57, 130, 0.045);
+  --panel: rgba(255, 255, 255, 0.94);
   --panel-solid: #ffffff;
-  --ink: #0a1220;
-  --muted: #607089;
-  --line: rgba(112, 132, 162, 0.22);
-  --brand: #0f8b8d;
-  --brand-strong: #0a6d74;
-  --cyan: #0ea5b7;
-  --indigo: #364fc7;
-  --accent: #d97706;
+  --ink: #10213f;
+  --muted: #63718a;
+  --line: rgba(23, 66, 132, 0.18);
+  --brand: #1456b8;
+  --brand-strong: #0b3477;
+  --cyan: #2878d4;
+  --indigo: #173f8a;
+  --accent: #d4a72c;
   --danger: #c24136;
-  --soft: rgba(14, 165, 183, 0.1);
-  --shadow: 0 18px 50px rgba(15, 23, 42, 0.1), 0 4px 16px rgba(15, 23, 42, 0.06);
-  --radius: 12px;
+  --soft: rgba(20, 86, 184, 0.08);
+  --shadow: 0 14px 34px rgba(15, 43, 92, 0.08), 0 2px 8px rgba(15, 43, 92, 0.04);
+  --radius: 10px;
 }
 
 * {
@@ -33,7 +33,7 @@ body {
   background:
     linear-gradient(var(--bg-grid) 1px, transparent 1px),
     linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px),
-    linear-gradient(135deg, #f8fbff 0%, #eef3f8 48%, #f6f4ef 100%);
+    linear-gradient(135deg, #fbfcff 0%, #f3f6fb 54%, #f9f8f1 100%);
   background-size: 34px 34px, 34px 34px, auto;
   color: var(--ink);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -491,10 +491,8 @@ button {
 }
 
 .sidebar {
-  background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(12, 20, 35, 0.98)),
-    #0f172a;
-  border-right: 1px solid rgba(14, 165, 183, 0.22);
+  background: linear-gradient(180deg, #0b3477 0%, #08295f 55%, #061f49 100%);
+  border-right: 1px solid rgba(212, 167, 44, 0.38);
   color: #fff;
   display: flex;
   flex-direction: column;
@@ -509,19 +507,23 @@ button {
 }
 
 .brand {
-  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+  display: flex;
+  gap: 12px;
   margin-bottom: 24px;
   padding-bottom: 22px;
 }
 
 .brand strong {
   display: block;
-  font-size: 22px;
+  font-size: 16px;
   font-weight: 850;
 }
 
 .brand span {
-  color: #91a3b8;
+  color: #c9d8ee;
+  font-size: 13px;
   display: block;
   margin-top: 6px;
 }
@@ -543,9 +545,9 @@ button {
 
 .nav-button.active,
 .nav-button:hover {
-  background: rgba(14, 165, 183, 0.12);
-  border-color: rgba(14, 165, 183, 0.34);
-  box-shadow: inset 3px 0 0 var(--cyan);
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(212, 167, 44, 0.45);
+  box-shadow: inset 3px 0 0 var(--accent);
   color: #fff;
 }
 
@@ -575,6 +577,7 @@ button {
 .page-title h1 {
   font-size: 36px;
   font-weight: 850;
+  color: var(--brand-strong);
 }
 
 .page-title p {
@@ -589,9 +592,8 @@ button {
 }
 
 .report-bar {
-  background: rgba(255, 255, 255, 0.66);
-  backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(23, 66, 132, 0.15);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   display: grid;
@@ -608,7 +610,7 @@ button {
 }
 
 .report-label {
-  color: #44536a;
+  color: var(--brand-strong);
   font-size: 13px;
   font-weight: 850;
   text-transform: uppercase;
@@ -644,8 +646,8 @@ button {
 
 .report-pill.active,
 .report-pill:hover {
-  background: rgba(14, 165, 183, 0.1);
-  border-color: rgba(14, 165, 183, 0.4);
+  background: rgba(20, 86, 184, 0.08);
+  border-color: rgba(20, 86, 184, 0.4);
   color: var(--brand-strong);
 }
 
@@ -685,7 +687,7 @@ button {
 .table-wrap {
   background: var(--panel);
   backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(23, 66, 132, 0.14);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   overflow: hidden;
@@ -693,7 +695,7 @@ button {
 
 .table-wrap {
   background: var(--panel-solid);
-  border-color: rgba(112, 132, 162, 0.28);
+  border-color: rgba(23, 66, 132, 0.2);
   border-radius: 8px;
 }
 
@@ -703,7 +705,7 @@ button {
 }
 
 .stat::before {
-  background: linear-gradient(180deg, var(--cyan), var(--accent));
+  background: linear-gradient(180deg, var(--accent), #e7c662);
   content: "";
   inset: 0 auto 0 0;
   position: absolute;
@@ -746,8 +748,8 @@ button {
 }
 
 .table-title {
-  background: #ffffff;
-  border-bottom: 1px solid rgba(112, 132, 162, 0.26);
+  background: linear-gradient(90deg, #f7faff, #ffffff);
+  border-bottom: 2px solid rgba(212, 167, 44, 0.48);
   margin: 0;
   padding: 18px 20px;
 }
@@ -930,7 +932,7 @@ table {
 }
 
 thead {
-  background: #f3f6f9;
+  background: #eef4fd;
 }
 
 th,
@@ -957,8 +959,8 @@ tbody tr:last-child td {
 }
 
 th {
-  border-bottom-color: rgba(112, 132, 162, 0.28);
-  color: #344055;
+  border-bottom-color: rgba(23, 66, 132, 0.24);
+  color: var(--brand-strong);
   font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.02em;
@@ -997,7 +999,7 @@ tbody tr {
 }
 
 tbody tr:hover {
-  background: rgba(14, 165, 183, 0.045);
+  background: rgba(20, 86, 184, 0.045);
 }
 
 .mono {
@@ -1472,4 +1474,21 @@ tbody tr:hover {
     gap: 12px;
     grid-auto-columns: 34px;
   }
+}
+.brand-mark {
+  align-items: center;
+  background: #fff;
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.16);
+  color: var(--brand-strong);
+  display: flex;
+  flex: 0 0 auto;
+  font-family: Georgia, serif;
+  font-size: 12px;
+  font-weight: 900;
+  height: 42px;
+  justify-content: center;
+  letter-spacing: -0.08em;
+  width: 42px;
 }

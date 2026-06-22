@@ -210,8 +210,11 @@ export default function AdminApp() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <strong>AI Agent Admin</strong>
-          <span>Admin chatbot PMB</span>
+          <div className="brand-mark" aria-hidden="true">UBL</div>
+          <div>
+            <strong>Universitas Bandar Lampung</strong>
+            <span>Admin Chatbot PMB</span>
+          </div>
         </div>
         <nav className="nav" aria-label="Menu admin">
           <button className={`nav-button ${tab === "dashboard" ? "active" : ""}`} onClick={() => setTab("dashboard")}>
