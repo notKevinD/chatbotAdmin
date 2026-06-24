@@ -1386,6 +1386,7 @@ tbody tr:hover {
   }
 
   .logout-button {
+    padding: 10px 14px;
     bottom: 16px;
     left: 16px;
     width: calc(100% - 32px);

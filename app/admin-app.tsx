@@ -221,10 +221,10 @@ export default function AdminApp() {
             Dashboard
           </button>
           <button className={`nav-button ${tab === "rag" ? "active" : ""}`} onClick={() => setTab("rag")}>
-            Data Chatbot
+            Kelola Basis Pengetahuan AI
           </button>
           <button className={`nav-button ${tab === "chat" ? "active" : ""}`} onClick={() => setTab("chat")}>
-            Chat
+            Riwayat Percakapan
           </button>
         </nav>
           <button className="button secondary logout-button" onClick={logout}>
