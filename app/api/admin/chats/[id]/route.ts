@@ -14,8 +14,8 @@ export async function GET(
   const sessionId = params.id;
 
   try {
-    const data = await withClient(async (client) => {
-      // 1. Deteksi tabel pesan secara otomatis
+    // Ambil data array pairs murni dari wrapper database
+    const finalPairs = await withClient(async (client) => {
       const msgTableInfo = await getColumns(client, "chat_messages").catch(async () => {
         return await getColumns(client, "messages");
       });
@@ -30,12 +30,11 @@ export async function GET(
       const fallbackColumn = pickColumn(msgTableInfo.columns, ["is_fallback", "fallback"]);
       const contextColumn = pickColumn(msgTableInfo.columns, ["context", "sources", "retrieved_context"]);
 
-      // Deteksi tabel master sessions untuk data leads prospek
-      const chatTableInfo = await getColumns(client, "chat_sessions").catch(() => null);
       let visitorName = "Calon Mahasiswa";
       let visitorPhone = "-";
       let visitorSchool = "Sekolah Umum";
 
+      const chatTableInfo = await getColumns(client, "chat_sessions").catch(() => null);
       if (chatTableInfo) {
         const sIdCol = pickColumn(chatTableInfo.columns, ["id", "session_id", "sessionId"]);
         const sUserCol = pickColumn(chatTableInfo.columns, ["user_id", "user_identifier", "phone", "email", "name"]);
@@ -58,7 +57,6 @@ export async function GET(
         throw new Error("Struktur kolom tabel pesan obrolan tidak sesuai.");
       }
 
-      // 2. Ambil seluruh riwayat gelembung percakapan
       const messagesRes = await client.query(
         `
           select 
@@ -79,7 +77,6 @@ export async function GET(
       const pairs: any[] = [];
       const rows = messagesRes.rows;
 
-      // 3. Transformasi baris relasional PostgreSQL menjadi pasangan array ChatPair (Question & Answer)
       for (let i = 0; i < rows.length; i++) {
         if (rows[i].role === "user" || rows[i].role === "customer") {
           const nextRow = rows[i + 1];
@@ -113,10 +110,6 @@ export async function GET(
         }
       }
 
-      // PERBAIKAN PENTING: Jika pairs kosong, berikan minimal 1 objek dummy agar front-end pairs[0] tidak crash membaca undefined
-      // ... (Kode looping pembentukan array pairs di atasnya tetap sama)
-
-      // PERBAIKAN PENTING: Jika pairs kosong, berikan minimal 1 objek dummy agar front-end pairs[0] tidak crash membaca undefined
       if (pairs.length === 0) {
         pairs.push({
           question: "Tidak ada pesan",
@@ -131,11 +124,12 @@ export async function GET(
         });
       }
 
-      // Langsung return array pairs secara polos ke front-end
-      return NextResponse.json(pairs);
+      return pairs; // Kembalikan data array mentah ke lingkup luar
     });
 
-    return data;
+    // Kirim respons HTTP JSON murni dari array terluar
+    return NextResponse.json(finalPairs);
+
   } catch (error) {
     console.error("Error pada API Detail Chats:", error);
     return NextResponse.json(
