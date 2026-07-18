@@ -63,25 +63,26 @@ export function ChatPanel({
 
   // Jauh lebih bersih, reaktif, dan aman dari balapan data asinkronus
   async function handleOpenSession(sessionId: string) {
-    onSelect(sessionId, 1);
-    setIsDetailOpen(true);
+    // 1. Tampilkan status loading segera
     setIsLoadingChat(true);
-    setLocalPairs([]); // Reset logs lama agar tidak berbayang
+    setIsDetailOpen(true); // Modal terbuka, tapi isinya nanti akan diisi saat data siap
 
     try {
+      // 2. Fetch data secara langsung dari API
       const res = await fetch(`/api/admin/chats/${sessionId}`);
       if (!res.ok) throw new Error("Gagal memuat log");
       const data = await res.json();
 
+      // 3. Update state lokal setelah data diterima
       if (data) {
-        // Ekstrak data array polos dari backend hybrid payload kita
         const targetPairs = data.pairs || data;
         setLocalPairs(Array.isArray(targetPairs) ? targetPairs : []);
       }
     } catch (err) {
-      console.error("Bypass fetching error:", err);
+      console.error("Error saat memuat log:", err);
+      setLocalPairs([]); // Reset jika gagal
     } finally {
-      setIsLoadingChat(false);
+      setIsLoadingChat(false); // Matikan indikator loading
     }
   }
 
