@@ -233,34 +233,37 @@ export async function GET(request: Request) {
       }
 
       // exportType === "data_leads"
+      // Rekap per VISITOR (bukan per session): berapa session & berapa chat yang mereka lakukan
       const buffer = await withClient(async (client) => {
         const query = `
           SELECT 
-            h.session_id AS session_id,
+            v.visitor_uuid AS visitor_uuid,
             v.visitors_name AS visitor_name,
             v.visitors_phone_number AS visitor_phone_number,
             v.visitor_school_origin AS visitor_school_origin,
-            COUNT(*) AS total_pertanyaan,
+            COUNT(DISTINCT h.session_id) AS total_session,
+            COUNT(h.id) AS total_chat,
             MAX(h.time_start) AS last_seen
           ${joinClause}
           ${whereClause}
-          GROUP BY h.session_id, v.visitors_name, v.visitors_phone_number, v.visitor_school_origin
+          ${whereClause ? "AND" : "WHERE"} v.visitor_uuid IS NOT NULL
+          GROUP BY v.visitor_uuid, v.visitors_name, v.visitors_phone_number, v.visitor_school_origin
           ORDER BY last_seen DESC
         `;
         const res = await client.query(query, params);
 
         const rows = res.rows.map((row) => [
-          row.session_id || "",
           row.visitor_name || "",
           row.visitor_phone_number || "",
           row.visitor_school_origin || "",
-          row.total_pertanyaan || 0,
+          row.total_session || 0,
+          row.total_chat || 0,
           row.last_seen ? new Date(row.last_seen).toISOString() : ""
         ]);
 
         return buildXlsxBuffer(
           "Data Leads",
-          ["session_id", "nama", "no_telepon", "asal_sekolah", "total_pertanyaan", "last_seen"],
+          ["nama", "no_telepon", "asal_sekolah", "total_session", "total_chat", "last_seen"],
           rows
         );
       });
