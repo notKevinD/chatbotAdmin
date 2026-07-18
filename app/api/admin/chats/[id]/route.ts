@@ -14,8 +14,8 @@ export async function GET(
   const sessionId = params.id;
 
   try {
-    // Ambil data array pairs murni dari wrapper database
-    const finalPairs = await withClient(async (client) => {
+    // 1. Dapatkan data dasar mentah dari database wrapper terlebih dahulu
+    const dbResult = await withClient(async (client) => {
       const msgTableInfo = await getColumns(client, "chat_messages").catch(async () => {
         return await getColumns(client, "messages");
       });
@@ -124,11 +124,18 @@ export async function GET(
         });
       }
 
-      return pairs; // Kembalikan data array mentah ke lingkup luar
+      return { pairs, rows };
     });
 
-    // Kirim respons HTTP JSON murni dari array terluar
-    return NextResponse.json(finalPairs);
+    // 2. Terapkan Trik Pro Hybrid Object-Array di luar cakupan database
+    // Menggabungkan array pairs dengan properti .pairs dan .messages ke satu payload
+    const finalPayload = Object.assign(dbResult.pairs, {
+      pairs: dbResult.pairs,
+      messages: dbResult.rows
+    });
+
+    // 3. Kirimkan objek terpadu ini langsung menuju front-end
+    return NextResponse.json(finalPayload);
 
   } catch (error) {
     console.error("Error pada API Detail Chats:", error);
