@@ -32,14 +32,42 @@ function extractTextFromRaw(rawMeta: any, previewText: string): { question: stri
 //   2. Insert/update/delete langsung ke tabel `documents` (dan `metadata_table`
 //      untuk delete_metadata)
 //   3. Menjalankan `ANALYZE documents;` setelah mutasi selesai
-//   4. Membalas JSON: { "success": true, "id"?: string, "deleted"?: number }
-//      atau { "success": false, "error": string } jika gagal
+//   4. Membalas JSON — WAJIB balas dalam 20 detik (lihat N8N_CRUD_TIMEOUT_MS),
+//      kalau tidak, request dianggap gagal dan user melihat pesan "n8n tidak aktif":
+//
+//        create_chunk sukses : { "success": true, "id": "uuid-baru", "eventType": "create_chunk" }
+//        create_chunk gagal  : { "success": false, "error": "...", "eventType": "create_chunk" }
+//        update_chunk sukses : { "success": true, "eventType": "update_chunk" }
+//        update_chunk gagal  : { "success": false, "error": "...", "eventType": "update_chunk" }
+//
+//      Kalau n8n mati/down/tidak merespons, Next.js otomatis menampilkan pesan
+//      error yang jelas ke admin (bukan hang selamanya) — lihat callN8nCrudWebhook().
 //
 // Body yang dikirim Next.js ke n8n selalu punya field "eventType":
 //   - "create_chunk"    { eventType, metadataName, text, sheet }
-//   - "update_chunk"    { eventType, id, text, metadataName }
-//   - "delete_chunk"    { eventType, id, metadataName }
-//   - "delete_metadata" { eventType, metadataName }
+//   - "update_chunk"    { eventType, id, text, metadataName, sheet }
+//
+// CATATAN: hapus SATU CHUNK maupun hapus SATU FILE PENUH TIDAK lewat n8n —
+// keduanya langsung SQL DELETE + ANALYZE documents di Next.js, karena tidak
+// butuh embedding/AI apapun. Lihat handler DELETE di bawah untuk detailnya.
+//
+// Bentuk kolom `metadata` (jsonb) di tabel `documents` untuk data hasil upload
+// Excel asli terlihat seperti ini (contoh nyata dari DB):
+//   {
+//     "loc": { "lines": { "from": 1, "to": 2 } },
+//     "sheet": "Data Basis Pengetahuan Chatbot.xlsx",
+//     "source": "blob",
+//     "blobType": "text/plain",
+//     "metadata_name": "Data Basis Pengetahuan Chatbot.xlsx"
+//   }
+// Untuk chunk yang ditambah/diedit MANUAL lewat panel admin ini, n8n cukup
+// membentuk metadata dengan pola yang sama, tapi:
+//   - "sheet" diisi dari field `sheet` yang dikirim payload ini
+//     (untuk create baru = "Manual_Added", untuk edit = sheet asli chunk itu)
+//   - "source" diisi "manual" (bukan "blob") supaya kelihatan asalnya
+//   - "loc.lines.from"/"to" boleh diisi null/0 — nomor baris asli spreadsheet
+//     TIDAK relevan untuk entri manual, jadi tidak perlu dikirim dari sini.
+//   - "metadata_name" = nilai `metadataName` di payload ini
 // ========================================================
 
 type N8nCrudResult = {
@@ -47,30 +75,55 @@ type N8nCrudResult = {
   id?: string;
   deleted?: number;
   error?: string;
+  eventType?: string;
 };
+
+const N8N_CRUD_TIMEOUT_MS = 20000; // 20 detik — kalau n8n tidak balas sampai batas ini, dianggap gagal
 
 async function callN8nCrudWebhook(payload: Record<string, unknown>): Promise<N8nCrudResult> {
   const webhookUrl = process.env.N8N_RAG_CRUD_WEBHOOK;
   if (!webhookUrl) {
-    throw new Error("N8N_RAG_CRUD_WEBHOOK belum diatur di environment.");
+    throw new Error("N8N_RAG_CRUD_WEBHOOK belum diatur di environment (.env.production).");
   }
 
-  const response = await fetch(webhookUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), N8N_CRUD_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(
+        `Server n8n tidak merespons dalam ${N8N_CRUD_TIMEOUT_MS / 1000} detik. Pastikan workflow n8n aktif (tidak sedang berhenti/di-pause) dan webhook "${payload.eventType}" tersambung dengan benar.`
+      );
+    }
+    throw new Error(
+      "Tidak dapat terhubung ke server n8n. Kemungkinan n8n sedang mati/down, URL webhook salah, atau ada masalah jaringan/firewall di VPS."
+    );
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   const text = await response.text();
   let parsed: N8nCrudResult = {};
   try {
     parsed = text ? JSON.parse(text) : {};
   } catch {
-    parsed = {};
+    // n8n merespons tapi bukan JSON valid (misal workflow belum di-set node "Respond to Webhook"
+    // dengan benar, atau error HTML dari server) — anggap gagal dan tunjukkan potongan responsnya.
+    throw new Error(
+      `Server n8n merespons tapi formatnya bukan JSON yang valid (kemungkinan node "Respond to Webhook" belum dikonfigurasi). Respons mentah: ${text.slice(0, 200) || "(kosong)"}`
+    );
   }
 
   if (!response.ok || parsed.success === false) {
-    throw new Error(parsed.error || `Webhook n8n gagal (status ${response.status}).`);
+    throw new Error(parsed.error || `Webhook n8n menolak permintaan (status HTTP ${response.status}).`);
   }
 
   return parsed;
@@ -292,7 +345,11 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, id: result.id });
   } catch (error) {
-    return NextResponse.json({ error: formatDbError(error, "Gagal menambahkan chunk baru.") }, { status: 500 });
+    console.error("Gagal menambah chunk via n8n:", error);
+    return NextResponse.json(
+      { error: formatDbError(error, "Gagal menambahkan chunk baru. Periksa apakah workflow n8n aktif.") },
+      { status: 502 }
+    );
   }
 }
 
@@ -303,7 +360,7 @@ export async function PUT(request: Request) {
   const admin = await getCurrentAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { id, text, metadataName } = await request.json().catch(() => ({}));
+  const { id, text, metadataName, sheet } = await request.json().catch(() => ({}));
   if (!id || !text) {
     return NextResponse.json({ error: "ID chunk dan konten teks baru wajib dikirimkan." }, { status: 400 });
   }
@@ -313,7 +370,8 @@ export async function PUT(request: Request) {
       eventType: "update_chunk",
       id: String(id),
       text,
-      metadataName
+      metadataName,
+      sheet: sheet || "Manual_Edited"
     });
 
     await writeAuditLog({
@@ -325,13 +383,23 @@ export async function PUT(request: Request) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    return NextResponse.json({ error: formatDbError(error, "Gagal memperbarui segmen data chunk.") }, { status: 500 });
+    console.error("Gagal update chunk via n8n:", error);
+    return NextResponse.json(
+      { error: formatDbError(error, "Gagal memperbarui segmen data chunk. Periksa apakah workflow n8n aktif.") },
+      { status: 502 }
+    );
   }
 }
 
 // ========================================================
-// 4. DELETE: HAPUS SATU CHUNK ATAU SELURUH FILE METADATA — diproses n8n (delete + ANALYZE)
+// 4. DELETE: HAPUS SATU CHUNK ATAU SELURUH FILE METADATA — LANGSUNG DB
 // ========================================================
+// Baik hapus satu chunk maupun hapus satu file penuh TIDAK lewat n8n —
+// keduanya murni SQL DELETE, tidak butuh embedding/AI apapun. Setelah delete,
+// `ANALYZE documents;` dijalankan langsung di sini supaya statistik index
+// vector (HNSW) & query planner tetap akurat, tanpa bergantung pada n8n aktif
+// atau tidak.
+//
 // Dua cara mengirim parameter (mengikuti frontend yang sudah ada):
 //   - Hapus satu chunk: query string  ?id=...&metadataName=...
 //   - Hapus satu file penuh: JSON body { metadataName }
@@ -354,23 +422,103 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Kirim id atau metadataName untuk melakukan penghapusan." }, { status: 400 });
   }
 
+  // --------------------------------------------------------
+  // Hapus SATU CHUNK → langsung ke database
+  // --------------------------------------------------------
+  if (id) {
+    try {
+      const deletedCount = await withClient(async (client) => {
+        const documentInfo = await getColumns(client, "documents");
+        const idColumn = pickColumn(documentInfo.columns, ["id", "uuid", "document_id"]);
+
+        if (!idColumn) {
+          throw new Error("Kolom id tidak ditemukan di tabel documents.");
+        }
+
+        const result = await client.query(
+          `delete from ${documentInfo.table.sql} where ${quoteIdent(idColumn)}::text = $1::text`,
+          [String(id)]
+        );
+
+        // Refresh statistik index vector (HNSW) setelah penghapusan
+        await client.query("ANALYZE documents");
+
+        return result.rowCount || 0;
+      });
+
+      await writeAuditLog({
+        request,
+        userId: admin.id,
+        action: "delete_rag_chunk",
+        detail: { id: String(id), metadataName: metadataName || undefined, deleted: deletedCount }
+      });
+
+      return NextResponse.json({ ok: true, deleted: deletedCount });
+    } catch (error) {
+      console.error("Gagal hapus chunk langsung di DB:", error);
+      return NextResponse.json(
+        { error: formatDbError(error, "Gagal menghapus chunk.") },
+        { status: 500 }
+      );
+    }
+  }
+
+  // --------------------------------------------------------
+  // Hapus SATU FILE PENUH → langsung ke database
+  // --------------------------------------------------------
   try {
-    const eventType = id ? "delete_chunk" : "delete_metadata";
-    const result = await callN8nCrudWebhook({
-      eventType,
-      id: id ? String(id) : undefined,
-      metadataName: metadataName || undefined
+    const deletedCount = await withClient(async (client) => {
+      const metadataInfo = await getColumns(client, "metadata_table");
+      const documentInfo = await getColumns(client, "documents");
+      const nameColumn = pickColumn(metadataInfo.columns, ["metadata_name", "metadataName", "name", "fileName", "source", "title"]);
+      const metadataColumn = pickColumn(documentInfo.columns, ["metadata"]);
+
+      let deletedDocs = 0;
+
+      // Hapus chunk yang match lewat field jsonb (menjaga kompatibilitas data lama)
+      if (metadataColumn) {
+        const metaQuote = quoteIdent(metadataColumn);
+        const conditions = [
+          `${metaQuote}->>'metadata_name' = $1::text`,
+          `${metaQuote}->>'metadataName' = $1::text`,
+          `${metaQuote}->>'source' = $1::text`,
+          `${metaQuote}->>'fileName' = $1::text`
+        ];
+        const result = await client.query(
+          `delete from ${documentInfo.table.sql} where ${conditions.join(" or ")}`,
+          [metadataName]
+        );
+        deletedDocs += result.rowCount || 0;
+      }
+
+      // Hapus baris metadata_table — FK CASCADE otomatis membereskan sisa
+      // chunk yang terhubung lewat metadata_id (kalau ada)
+      if (nameColumn) {
+        await client.query(
+          `delete from ${metadataInfo.table.sql} where ${quoteIdent(nameColumn)}::text = $1::text`,
+          [metadataName]
+        );
+      }
+
+      // Refresh statistik index HNSW/vector setelah penghapusan massal
+      await client.query("ANALYZE documents");
+
+      return deletedDocs;
     });
 
     await writeAuditLog({
       request,
       userId: admin.id,
-      action: id ? "delete_rag_chunk" : "delete_rag_metadata",
-      detail: { id: id ? String(id) : undefined, metadataName: metadataName || undefined, deleted: result.deleted }
+      action: "delete_rag_metadata",
+      detail: { metadataName, deleted: deletedCount }
     });
 
-    return NextResponse.json({ ok: true, deleted: result.deleted ?? 1 });
+    return NextResponse.json({ ok: true, deleted: deletedCount });
   } catch (error) {
-    return NextResponse.json({ error: formatDbError(error, "Gagal menghapus dokumen.") }, { status: 500 });
+    console.error("Gagal hapus metadata langsung di DB:", error);
+    return NextResponse.json(
+      { error: formatDbError(error, "Gagal menghapus file data.") },
+      { status: 500 }
+    );
   }
 }

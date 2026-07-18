@@ -131,7 +131,11 @@ export function RagPanel({
         await loadDetails(selectedMetadata, documentPagination?.page || 1);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal menambahkan data.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Gagal menambahkan data. Pastikan workflow n8n aktif dan dapat diakses.",
+      );
     } finally {
       setSubmittingModal(false);
     }
@@ -149,6 +153,11 @@ export function RagPanel({
     const fullText = `Pertanyaan: ${editQuestion.trim()}\nJawaban: ${editAnswer.trim()}`;
 
     try {
+      const originalSheet =
+        (selectedChunkForEdit.raw as any)?.metadata?.sheet ||
+        (selectedChunkForEdit.raw as any)?.metadata?.["sheet"] ||
+        "Manual_Edited";
+
       await fetchJson("/api/admin/documents", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -156,6 +165,7 @@ export function RagPanel({
           id: selectedChunkForEdit.id,
           text: fullText,
           metadataName: selectedChunkForEdit.metadata_name,
+          sheet: originalSheet,
         }),
       });
 
@@ -163,7 +173,11 @@ export function RagPanel({
       setIsEditModalOpen(false);
       await loadDetails(selectedMetadata, documentPagination?.page || 1);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal memperbarui chunk.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Gagal memperbarui chunk. Pastikan workflow n8n aktif dan dapat diakses.",
+      );
     } finally {
       setSubmittingModal(false);
     }
@@ -182,7 +196,7 @@ export function RagPanel({
         setLoadingText("Menghapus segmen data...");
         try {
           await fetchJson(
-            `/api/admin/documents?id=${row.id}&metadataName=${row.metadata_name}`,
+            `/api/admin/documents?id=${encodeURIComponent(row.id)}&metadataName=${encodeURIComponent(row.metadata_name)}`,
             {
               method: "DELETE",
             },
@@ -828,7 +842,7 @@ export function RagPanel({
                   disabled={submittingModal}
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold shadow-sm"
                 >
-                  {submittingModal ? "Menyimpan..." : "Simpan & Embed"}
+                  {submittingModal ? "Menunggu balasan n8n..." : "Simpan & Embed"}
                 </button>
               </div>
             </form>
@@ -915,7 +929,7 @@ export function RagPanel({
                   disabled={submittingModal}
                   className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-semibold shadow-sm"
                 >
-                  {submittingModal ? "Memproses..." : "Simpan Perubahan"}
+                  {submittingModal ? "Menunggu balasan n8n..." : "Simpan Perubahan"}
                 </button>
               </div>
             </form>
