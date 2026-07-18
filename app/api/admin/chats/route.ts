@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import * as XLSX from "xlsx";
 import { getCurrentAdmin } from "@/lib/auth";
 import { formatDbError, withClient } from "@/lib/db";
 
@@ -93,30 +94,51 @@ function getDateRange(range: Range, customStart?: string, customEnd?: string): {
   return { start, end };
 }
 
-// Escape satu nilai untuk field CSV (RFC 4180): bungkus dengan kutip dua
-// jika mengandung koma, kutip dua, atau baris baru; ganda-kan kutip dua di dalamnya.
-function csvEscape(value: unknown) {
-  const text = value === null || value === undefined ? "" : String(value);
-  if (/[",\n\r]/.test(text)) {
-    return `"${text.replace(/"/g, '""')}"`;
+// Membangun file .xlsx asli (bukan CSV) agar:
+//  - Teks jawaban chatbot yang mengandung baris baru tetap berada dalam SATU sel
+//    (bukan terpecah jadi baris baru seperti yang terjadi di CSV).
+//  - Baris yang diawali "-" (misalnya daftar program studi) tidak salah
+//    dianggap formula oleh Excel (yang menyebabkan #NAME?), karena nilainya
+//    ditulis sebagai string sel murni, bukan lewat parser teks.
+function buildXlsxBuffer(sheetName: string, headers: string[], rows: Array<Array<unknown>>) {
+  const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+
+  // Lebar kolom otomatis (perkiraan) berdasarkan konten terpanjang, dibatasi biar tidak ekstrem
+  const columnWidths = headers.map((header, colIndex) => {
+    let maxLen = String(header).length;
+    for (const row of rows) {
+      const cell = row[colIndex];
+      const text = cell === null || cell === undefined ? "" : String(cell);
+      const firstLineLen = text.split("\n")[0].length;
+      if (firstLineLen > maxLen) maxLen = firstLineLen;
+    }
+    return { wch: Math.min(Math.max(maxLen + 2, 10), 60) };
+  });
+  worksheet["!cols"] = columnWidths;
+
+  // Aktifkan wrap text supaya sel multi-baris ditampilkan rapi, bukan satu baris panjang
+  const range = XLSX.utils.decode_range(worksheet["!ref"] || "A1");
+  for (let row = range.s.r; row <= range.e.r; row++) {
+    for (let col = range.s.c; col <= range.e.c; col++) {
+      const address = XLSX.utils.encode_cell({ r: row, c: col });
+      const cell = worksheet[address];
+      if (!cell) continue;
+      cell.s = cell.s || {};
+      cell.s.alignment = { wrapText: true, vertical: "top" };
+    }
   }
-  return text;
+
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+
+  return XLSX.write(workbook, { type: "buffer", bookType: "xlsx", cellStyles: true }) as Buffer;
 }
 
-function toCsv(headers: string[], rows: Array<Array<unknown>>) {
-  const lines = [headers.map(csvEscape).join(",")];
-  for (const row of rows) {
-    lines.push(row.map(csvEscape).join(","));
-  }
-  // Tambahkan BOM agar karakter non-ASCII (misal nama dengan aksen) terbaca benar di Excel
-  return "\uFEFF" + lines.join("\r\n");
-}
-
-function csvResponse(fileName: string, csvContent: string) {
-  return new NextResponse(csvContent, {
+function xlsxResponse(fileName: string, buffer: Buffer) {
+  return new NextResponse(new Uint8Array(buffer), {
     status: 200,
     headers: {
-      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "Content-Disposition": `attachment; filename="${fileName}"`
     }
   });
@@ -168,7 +190,7 @@ export async function GET(request: Request) {
       `;
 
       if (exportType === "ragas") {
-        const csv = await withClient(async (client) => {
+        const buffer = await withClient(async (client) => {
           const query = `
             SELECT 
               h.session_id AS session_id,
@@ -187,7 +209,7 @@ export async function GET(request: Request) {
           const rows = res.rows.map((row) => {
             let contextText = "";
             if (row.context !== null && row.context !== undefined) {
-              contextText = typeof row.context === "string" ? row.context : JSON.stringify(row.context);
+              contextText = typeof row.context === "string" ? row.context : JSON.stringify(row.context, null, 2);
             }
             return [
               row.session_id || "",
@@ -200,17 +222,18 @@ export async function GET(request: Request) {
             ];
           });
 
-          return toCsv(
+          return buildXlsxBuffer(
+            "RAGAS",
             ["session_id", "question", "answer", "context", "isfallback", "time_start", "time_end"],
             rows
           );
         });
 
-        return csvResponse(`export-ragas-${new Date().toISOString()}.csv`, csv);
+        return xlsxResponse(`export-ragas-${new Date().toISOString()}.xlsx`, buffer);
       }
 
       // exportType === "data_leads"
-      const csv = await withClient(async (client) => {
+      const buffer = await withClient(async (client) => {
         const query = `
           SELECT 
             h.session_id AS session_id,
@@ -235,13 +258,14 @@ export async function GET(request: Request) {
           row.last_seen ? new Date(row.last_seen).toISOString() : ""
         ]);
 
-        return toCsv(
+        return buildXlsxBuffer(
+          "Data Leads",
           ["session_id", "nama", "no_telepon", "asal_sekolah", "total_pertanyaan", "last_seen"],
           rows
         );
       });
 
-      return csvResponse(`export-data_leads-${new Date().toISOString()}.csv`, csv);
+      return xlsxResponse(`export-data_leads-${new Date().toISOString()}.xlsx`, buffer);
     }
 
     // ─────────────────────────────────────────────────────────

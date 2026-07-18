@@ -87,7 +87,7 @@ export function ChatPanel({
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `export-${type}-${new Date().toISOString()}.csv`;
+      a.download = `export-${type}-${new Date().toISOString()}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
