@@ -71,11 +71,16 @@ export async function GET(request: Request) {
       const offsetIndex = queryParams.length + 2;
       queryParams.push(limit, offset);
 
+      // Cari kueri ini di bagian bawah file chats/route.ts Anda:
       const sessionsRes = await client.query(
         `
           select 
             ${quoteIdent(idColumn)}::text as id,
             ${userColumn ? `${quoteIdent(userColumn)}::text` : "'User Anonim'"} as user_display,
+            ${userColumn ? `${quoteIdent(userColumn)}::text` : "'User Anonim'"} as name,
+            ${userColumn ? `${quoteIdent(userColumn)}::text` : "'User Anonim'"} as username,
+            ${userColumn ? `${quoteIdent(userColumn)}::text` : "'User Anonim'"} as user_identifier,
+            ${userColumn ? `${quoteIdent(userColumn)}::text` : "'User Anonim'"} as title,
             ${updatedColumn ? `${quoteIdent(updatedColumn)}::text` : "now()::text"} as updated_at
           from ${chatTableInfo.table.sql}
           ${whereClause}
