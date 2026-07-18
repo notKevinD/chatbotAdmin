@@ -10,7 +10,6 @@ import {
   withClient,
 } from "@/lib/db";
 import * as XLSX from "xlsx";
-import crypto from "crypto";
 
 // Helper internal untuk mengonversi data context ke teks bersih
 function extractTextFromRaw(rawMeta: any, previewText: string): { question: string; answer: string } {
@@ -25,7 +24,61 @@ function extractTextFromRaw(rawMeta: any, previewText: string): { question: stri
 }
 
 // ========================================================
+// KONTRAK WEBHOOK N8N TUNGGAL UNTUK SEMUA MUTASI (CREATE/UPDATE/DELETE)
+// ========================================================
+// Semua operasi tulis (tambah, edit, hapus chunk, hapus file) dikirim ke SATU
+// webhook n8n (env: N8N_RAG_CRUD_WEBHOOK). n8n bertanggung jawab untuk:
+//   1. Generate embedding (OpenAI text-embedding-3-small) untuk create/update
+//   2. Insert/update/delete langsung ke tabel `documents` (dan `metadata_table`
+//      untuk delete_metadata)
+//   3. Menjalankan `ANALYZE documents;` setelah mutasi selesai
+//   4. Membalas JSON: { "success": true, "id"?: string, "deleted"?: number }
+//      atau { "success": false, "error": string } jika gagal
+//
+// Body yang dikirim Next.js ke n8n selalu punya field "eventType":
+//   - "create_chunk"    { eventType, metadataName, text, sheet }
+//   - "update_chunk"    { eventType, id, text, metadataName }
+//   - "delete_chunk"    { eventType, id, metadataName }
+//   - "delete_metadata" { eventType, metadataName }
+// ========================================================
+
+type N8nCrudResult = {
+  success?: boolean;
+  id?: string;
+  deleted?: number;
+  error?: string;
+};
+
+async function callN8nCrudWebhook(payload: Record<string, unknown>): Promise<N8nCrudResult> {
+  const webhookUrl = process.env.N8N_RAG_CRUD_WEBHOOK;
+  if (!webhookUrl) {
+    throw new Error("N8N_RAG_CRUD_WEBHOOK belum diatur di environment.");
+  }
+
+  const response = await fetch(webhookUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  const text = await response.text();
+  let parsed: N8nCrudResult = {};
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch {
+    parsed = {};
+  }
+
+  if (!response.ok || parsed.success === false) {
+    throw new Error(parsed.error || `Webhook n8n gagal (status ${response.status}).`);
+  }
+
+  return parsed;
+}
+
+// ========================================================
 // 1. GET: MENAMPILKAN DATA (METADATA/CHUNKS) & EKSPOR EXCEL
+// (tidak berubah — tetap baca langsung dari Postgres, ini operasi baca saja)
 // ========================================================
 export async function GET(request: Request) {
   if (!(await getCurrentAdmin())) {
@@ -34,7 +87,7 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const selectedMetadata = url.searchParams.get("metadata");
-  const fileToExport = url.searchParams.get("file"); 
+  const fileToExport = url.searchParams.get("file");
   const search = (url.searchParams.get("q") || "").trim();
   const page = Math.max(Number(url.searchParams.get("page") || "1"), 1);
   const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || "10"), 1), 100);
@@ -46,7 +99,7 @@ export async function GET(request: Request) {
       const idColumn = pickColumn(info.columns, ["id", "uuid", "document_id"]);
       const metaColumn = pickColumn(info.columns, ["metadata"]);
       const contentColumn = pickColumn(info.columns, ["content", "pageContent", "text", "document"]);
-      
+
       const metadataInfo = await getColumns(client, "metadata_table");
       const metadataNameColumn = pickColumn(metadataInfo.columns, ["metadata_name", "metadataName", "name", "fileName", "source", "title"]);
       const metadataCreatedColumn = pickColumn(metadataInfo.columns, ["created_at", "createdAt", "date"]);
@@ -211,118 +264,64 @@ export async function GET(request: Request) {
 }
 
 // ========================================================
-// 2. POST: TAMBAH DATA CHUNK BARU SECARA MANUAL
+// 2. POST: TAMBAH DATA CHUNK BARU — diproses n8n (embedding + insert + ANALYZE)
 // ========================================================
 export async function POST(request: Request) {
   const admin = await getCurrentAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const { metadataName, text, sheet } = await request.json().catch(() => ({}));
+  if (!metadataName || !text) {
+    return NextResponse.json({ error: "Metadata berkas tujuan dan isi teks wajib diisi." }, { status: 400 });
+  }
+
   try {
-    const { metadataName, text, sheet } = await request.json().catch(() => ({}));
-    if (!metadataName || !text) {
-      return NextResponse.json({ error: "Metadata berkas tujuan dan isi teks wajib diisi." }, { status: 400 });
-    }
-
-    const newChunkId = crypto.randomUUID();
-
-    await withClient(async (client) => {
-      const info = await getColumns(client, "documents");
-      const idColumn = pickColumn(info.columns, ["id", "uuid", "document_id"]);
-      const metaColumn = pickColumn(info.columns, ["metadata"]);
-      const contentColumn = pickColumn(info.columns, ["content", "pageContent", "text", "document"]);
-
-      const metadataNameExpression =
-        metaColumn === "metadata"
-          ? `coalesce(d.metadata->>'metadata_name', d.metadata->>'metadataName', d.metadata->'source'->>'source', d.metadata->>'source', d.metadata->>'fileName', 'Tanpa metadata')`
-          : "'Tanpa metadata'";
-
-      // Menghitung nomor baris virtual adaptif untuk metadata RAG terkait
-      const countRes = await client.query(
-        `select count(*)::int as count from ${info.table.sql} d where lower(${metadataNameExpression}) = lower($1::text)`,
-        [metadataName]
-      );
-      const nextVirtualRow = (countRes.rows[0]?.count || 0) + 1;
-
-      const rawMetadata = {
-        metadata_name: metadataName,
-        sheet: sheet || "Manual_Added",
-        row: nextVirtualRow,
-        text: text,
-        source: metadataName
-      };
-
-      await client.query(
-        `
-          insert into ${info.table.sql} (${quoteIdent(idColumn || "id")}, ${contentColumn ? quoteIdent(contentColumn) : "content"}, ${metaColumn ? quoteIdent(metaColumn) : "metadata"})
-          values ($1, $2, $3)
-        `,
-        [newChunkId, text, JSON.stringify(rawMetadata)]
-      );
+    const result = await callN8nCrudWebhook({
+      eventType: "create_chunk",
+      metadataName,
+      text,
+      sheet: sheet || "Manual_Added"
     });
 
-    const N8N_CREATE_WEBHOOK_URL = process.env.N8N_CREATE_WEBHOOK_URL;
-    if (N8N_CREATE_WEBHOOK_URL) {
-      fetch(N8N_CREATE_WEBHOOK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "create_chunk", chunkId: newChunkId, metadataName, text, sheet: sheet || "Manual_Added" })
-      }).catch((e) => console.error("Gagal mengirim data create ke n8n:", e));
-    }
+    await writeAuditLog({
+      request,
+      userId: admin.id,
+      action: "create_rag_chunk",
+      detail: { metadataName, id: result.id }
+    });
 
-    return NextResponse.json({ success: true, id: newChunkId });
+    return NextResponse.json({ success: true, id: result.id });
   } catch (error) {
     return NextResponse.json({ error: formatDbError(error, "Gagal menambahkan chunk baru.") }, { status: 500 });
   }
 }
 
 // ========================================================
-// 3. PUT: PERBARUI ISI TEXT SEGMEN CHUNK DATA
+// 3. PUT: PERBARUI ISI TEXT SEGMEN CHUNK — diproses n8n (re-embed + update + ANALYZE)
 // ========================================================
 export async function PUT(request: Request) {
   const admin = await getCurrentAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const { id, text, metadataName } = await request.json().catch(() => ({}));
+  if (!id || !text) {
+    return NextResponse.json({ error: "ID chunk dan konten teks baru wajib dikirimkan." }, { status: 400 });
+  }
+
   try {
-    const { id, text, metadataName } = await request.json().catch(() => ({}));
-    if (!id || !text) {
-      return NextResponse.json({ error: "ID chunk dan konten teks baru wajib dikirimkan." }, { status: 400 });
-    }
-
-    await withClient(async (client) => {
-      const info = await getColumns(client, "documents");
-      const idColumn = pickColumn(info.columns, ["id", "uuid", "document_id"]);
-      const metaColumn = pickColumn(info.columns, ["metadata"]);
-      const contentColumn = pickColumn(info.columns, ["content", "pageContent", "text", "document"]);
-
-      const currentRes = await client.query(
-        `select ${metaColumn ? quoteIdent(metaColumn) : "metadata"} as meta from ${info.table.sql} where ${quoteIdent(idColumn || "id")}::text = $1`,
-        [String(id)]
-      );
-      if (!currentRes.rows.length) throw new Error("Data chunk tidak ditemukan di database.");
-
-      const oldMeta = typeof currentRes.rows[0].meta === "string" ? JSON.parse(currentRes.rows[0].meta) : currentRes.rows[0].meta || {};
-      const updatedMeta = { ...oldMeta, text: text };
-
-      await client.query(
-        `
-          update ${info.table.sql}
-          set 
-            ${contentColumn ? `${quoteIdent(contentColumn)} = $1,` : ""}
-            ${quoteIdent(metaColumn || "metadata")} = $2
-          where ${quoteIdent(idColumn || "id")}::text = $3
-        `,
-        [text, JSON.stringify(updatedMeta), String(id)]
-      );
+    await callN8nCrudWebhook({
+      eventType: "update_chunk",
+      id: String(id),
+      text,
+      metadataName
     });
 
-    const N8N_UPDATE_WEBHOOK_URL = process.env.N8N_UPDATE_WEBHOOK_URL;
-    if (N8N_UPDATE_WEBHOOK_URL) {
-      fetch(N8N_UPDATE_WEBHOOK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update_chunk", chunkId: id, metadataName, text })
-      }).catch((e) => console.error("Gagal mengirim data update ke n8n:", e));
-    }
+    await writeAuditLog({
+      request,
+      userId: admin.id,
+      action: "update_rag_chunk",
+      detail: { id: String(id), metadataName }
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -331,85 +330,46 @@ export async function PUT(request: Request) {
 }
 
 // ========================================================
-// 4. DELETE: HAPUS SATU CHUNK DATA ATAU METADATA FILE LENGKAP
+// 4. DELETE: HAPUS SATU CHUNK ATAU SELURUH FILE METADATA — diproses n8n (delete + ANALYZE)
 // ========================================================
+// Dua cara mengirim parameter (mengikuti frontend yang sudah ada):
+//   - Hapus satu chunk: query string  ?id=...&metadataName=...
+//   - Hapus satu file penuh: JSON body { metadataName }
 export async function DELETE(request: Request) {
   const admin = await getCurrentAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { id, metadataName } = await request.json().catch(() => ({}));
+  const url = new URL(request.url);
+  const idFromQuery = url.searchParams.get("id") || "";
+  const metadataNameFromQuery = url.searchParams.get("metadataName") || "";
+
+  const bodyJson = await request.json().catch(() => ({}));
+  const metadataNameFromBody = bodyJson?.metadataName || "";
+  const idFromBody = bodyJson?.id || "";
+
+  const id = idFromQuery || idFromBody;
+  const metadataName = metadataNameFromQuery || metadataNameFromBody;
 
   if (!id && !metadataName) {
     return NextResponse.json({ error: "Kirim id atau metadataName untuk melakukan penghapusan." }, { status: 400 });
   }
 
   try {
-    const result = await withClient(async (client) => {
-      const info = await getColumns(client, "documents");
-      const idColumn = pickColumn(info.columns, ["id", "uuid", "document_id"]);
-      const metaColumn = pickColumn(info.columns, ["metadata"]);
-
-      if (id && idColumn) {
-        const deleteResult = await client.query(
-          `delete from ${info.table.sql} where ${quoteIdent(idColumn)}::text = $1`,
-          [String(id)],
-        );
-        
-        const N8N_DELETE_WEBHOOK_URL = process.env.N8N_DELETE_WEBHOOK_URL;
-        if (N8N_DELETE_WEBHOOK_URL) {
-          fetch(N8N_DELETE_WEBHOOK_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "delete_chunk", chunkId: String(id), metadataName })
-          }).catch((e) => console.error("Gagal kirim delete webhook n8n:", e));
-        }
-
-        await writeAuditLog({
-          request,
-          userId: admin.id,
-          action: "delete_rag_chunk",
-          detail: { id: String(id), deletedDocuments: deleteResult.rowCount || 0 }
-        });
-        return deleteResult;
-      }
-
-      if (metadataName && metaColumn) {
-        const deleteDocuments = await client.query(
-          `
-            delete from ${info.table.sql}
-            where ${quoteIdent(metaColumn)}->>'metadata_name' = $1
-              or ${quoteIdent(metaColumn)}->>'metadataName' = $1
-              or ${quoteIdent(metaColumn)}->'source'->>'source' = $1
-              or ${quoteIdent(metaColumn)}->>'source' = $1
-              or ${quoteIdent(metaColumn)}->>'fileName' = $1
-          `,
-          [String(metadataName)],
-        );
-        
-        const metadataInfo = await getColumns(client, "metadata_table");
-        const metadataNameColumn = pickColumn(metadataInfo.columns, ["metadata_name", "metadataName", "name", "fileName", "source", "title"]);
-
-        if (metadataNameColumn) {
-          await client.query(
-            `delete from ${metadataInfo.table.sql} where ${quoteIdent(metadataNameColumn)}::text = $1::text`,
-            [String(metadataName)],
-          );
-        }
-
-        await writeAuditLog({
-          request,
-          userId: admin.id,
-          action: "delete_rag_metadata",
-          detail: { metadataName: String(metadataName), deletedDocuments: deleteDocuments.rowCount || 0 }
-        });
-
-        return deleteDocuments;
-      }
-
-      throw new Error("Struktur kolom penyaring id/metadata tidak ditemukan di database.");
+    const eventType = id ? "delete_chunk" : "delete_metadata";
+    const result = await callN8nCrudWebhook({
+      eventType,
+      id: id ? String(id) : undefined,
+      metadataName: metadataName || undefined
     });
 
-    return NextResponse.json({ ok: true, deleted: result.rowCount });
+    await writeAuditLog({
+      request,
+      userId: admin.id,
+      action: id ? "delete_rag_chunk" : "delete_rag_metadata",
+      detail: { id: id ? String(id) : undefined, metadataName: metadataName || undefined, deleted: result.deleted }
+    });
+
+    return NextResponse.json({ ok: true, deleted: result.deleted ?? 1 });
   } catch (error) {
     return NextResponse.json({ error: formatDbError(error, "Gagal menghapus dokumen.") }, { status: 500 });
   }
