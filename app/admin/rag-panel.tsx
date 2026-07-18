@@ -205,6 +205,10 @@ export function RagPanel({
             },
           );
           setMessage("Segmen data chunk berhasil dihapus.");
+          // Urutan penting: reload() me-reset selectedMetadata & tabel detail,
+          // jadi harus dijalankan DULU, baru loadDetails() supaya state akhirnya
+          // tetap menampilkan detail file yang sedang dibuka.
+          await reload(metadataPagination?.page || 1);
           await loadDetails(selectedMetadata, documentPagination?.page || 1);
         } catch (err) {
           setError(
