@@ -11,34 +11,64 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Mengambil ID sesi yang diklik dari parameter URL dinamis Next.js
   const sessionId = params.id;
 
   try {
     const data = await withClient(async (client) => {
-      // 1. Deteksi nama tabel pesan secara adaptif di database Anda
+      // 1. Deteksi tabel pesan secara otomatis
       const msgTableInfo = await getColumns(client, "chat_messages").catch(async () => {
         return await getColumns(client, "messages");
       });
 
-      // 2. Petakan kolom secara otomatis
       const idColumn = pickColumn(msgTableInfo.columns, ["id", "message_id"]);
       const sessionRefColumn = pickColumn(msgTableInfo.columns, ["session_id", "sessionId", "session_ref"]);
       const roleColumn = pickColumn(msgTableInfo.columns, ["role", "sender_type", "sender"]);
       const contentColumn = pickColumn(msgTableInfo.columns, ["content", "message", "text_content", "text"]);
       const createdColumn = pickColumn(msgTableInfo.columns, ["created_at", "createdAt", "timestamp"]);
+      
+      // Deteksi kolom performa RAG bawaan jika ada
+      const latencyColumn = pickColumn(msgTableInfo.columns, ["response_time", "latency", "response_time_ms"]);
+      const fallbackColumn = pickColumn(msgTableInfo.columns, ["is_fallback", "fallback"]);
+      const contextColumn = pickColumn(msgTableInfo.columns, ["context", "sources", "retrieved_context"]);
 
-      if (!sessionRefColumn || !contentColumn) {
-        throw new Error("Struktur kolom tabel chat_messages tidak sesuai.");
+      // Deteksi opsional tabel master sessions untuk mengambil data prospek leads
+      const chatTableInfo = await getColumns(client, "chat_sessions").catch(() => null);
+      let visitorName = "Calon Mahasiswa";
+      let visitorPhone = "-";
+      let visitorSchool = "Sekolah Umum";
+
+      if (chatTableInfo) {
+        const sIdCol = pickColumn(chatTableInfo.columns, ["id", "session_id", "sessionId"]);
+        const sUserCol = pickColumn(chatTableInfo.columns, ["user_id", "user_identifier", "phone", "email", "name"]);
+        const sSchoolCol = pickColumn(chatTableInfo.columns, ["school", "school_origin", "visitor_school_origin"]);
+
+        if (sIdCol) {
+          const sessionMeta = await client.query(
+            `select ${sUserCol ? quoteIdent(sUserCol) : "null"} as name, ${sSchoolCol ? quoteIdent(sSchoolCol) : "null"} as school from ${chatTableInfo.table.sql} where ${quoteIdent(sIdCol)}::text = $1::text limit 1`,
+            [sessionId]
+          );
+          if (sessionMeta.rows.length && sessionMeta.rows[0].name) {
+            visitorName = sessionMeta.rows[0].name;
+            visitorPhone = sessionMeta.rows[0].name; // Gunakan pengenal jika telepon terpisah
+            if (sessionMeta.rows[0].school) visitorSchool = sessionMeta.rows[0].school;
+          }
+        }
       }
 
-      // 3. Ambil semua baris pesan obrolan yang memiliki session_id tersebut
+      if (!sessionRefColumn || !contentColumn) {
+        throw new Error("Struktur kolom tabel pesan obrolan tidak sesuai.");
+      }
+
+      // 2. Ambil seluruh riwayat gelembung percakapan
       const messagesRes = await client.query(
         `
           select 
             ${idColumn ? `${quoteIdent(idColumn)}::text` : "null"} as id,
             ${quoteIdent(roleColumn || "role")}::text as role,
             ${quoteIdent(contentColumn)}::text as content,
+            ${latencyColumn ? `${quoteIdent(latencyColumn)}::int` : "null"} as latency,
+            ${fallbackColumn ? `${quoteIdent(fallbackColumn)}::boolean` : "false"} as is_fallback,
+            ${contextColumn ? `${quoteIdent(contextColumn)}::text` : "null"} as context_raw,
             ${createdColumn ? `${quoteIdent(createdColumn)}::text` : "now()::text"} as created_at
           from ${msgTableInfo.table.sql}
           where ${quoteIdent(sessionRefColumn)}::text = $1::text
@@ -47,8 +77,50 @@ export async function GET(
         [sessionId]
       );
 
+      // 3. Transformasi baris relasional PostgreSQL menjadi pasangan array ChatPair (Question & Answer) untuk front-end
+      const pairs: any[] = [];
+      const rows = messagesRes.rows;
+
+      for (let i = 0; i < rows.length; i++) {
+        // Jika baris saat ini adalah pertanyaan dari user
+        if (rows[i].role === "user" || rows[i].role === "customer") {
+          const nextRow = rows[i + 1];
+          // Cari apakah baris berikutnya adalah jawaban dari bot AI
+          const hasBotAnswer = nextRow && (nextRow.role === "assistant" || nextRow.role === "bot" || nextRow.role === "system");
+
+          pairs.push({
+            question: rows[i].content,
+            answer: hasBotAnswer ? nextRow.content : "Bot tidak merespons.",
+            createdAt: rows[i].created_at,
+            responseTimeMs: hasBotAnswer && nextRow.latency ? nextRow.latency : 3200,
+            isFallback: hasBotAnswer ? nextRow.is_fallback : false,
+            context: hasBotAnswer && nextRow.context_raw ? nextRow.context_raw : "[]",
+            visitorName,
+            visitorPhoneNumber: visitorPhone,
+            visitorSchoolOrigin: visitorSchool
+          });
+
+          // Loncat satu indeks jika jawaban bot sudah dipasangkan
+          if (hasBotAnswer) i++;
+        } else {
+          // Jika data di DB tidak berpasangan rapi (misal bot menjawab langsung)
+          pairs.push({
+            question: "Pertanyaan tidak terekam",
+            answer: rows[i].content,
+            createdAt: rows[i].created_at,
+            responseTimeMs: rows[i].latency || 3200,
+            isFallback: rows[i].is_fallback || false,
+            context: rows[i].context_raw || "[]",
+            visitorName,
+            visitorPhoneNumber: visitorPhone,
+            visitorSchoolOrigin: visitorSchool
+          });
+        }
+      }
+
       return {
-        messages: messagesRes.rows
+        pairs,
+        messages: rows // sertakan fallback kueri dasar
       };
     });
 
