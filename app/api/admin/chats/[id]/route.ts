@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentAdmin } from "@/lib/auth";
-import { formatDbError, getColumns, pickColumn, quoteIdent, withClient } from "@/lib/db";
+import { withClient } from "@/lib/db";
 
 export async function GET(request: Request, { params }: { params: { id: string } }) {
   const admin = await getCurrentAdmin();
@@ -9,39 +9,35 @@ export async function GET(request: Request, { params }: { params: { id: string }
   const sessionId = params.id;
 
   try {
-    const data = await withClient(async (client) => {
-      // 1. Ambil data pesan dengan query paling simpel
-      const query = `
-        select * from chat_messages 
-        where session_id::text = $1::text 
-        order by created_at asc
-      `;
-      const res = await client.query(query, [sessionId]);
+    const finalPairs = await withClient(async (client) => {
+      // Menggunakan nama kolom yang sesuai dengan skema chat_history
+      const res = await client.query(
+        `SELECT * FROM chat_history WHERE session_id = $1 ORDER BY time_start ASC`,
+        [sessionId]
+      );
       
-      // 2. Jika data kosong, jangan crash, kembalikan array kosong
       const rows = res.rows || [];
       const pairs = rows.map(row => ({
-        question: row.content || "Tidak ada pertanyaan",
-        answer: row.content || "Tidak ada jawaban",
-        createdAt: row.created_at || new Date().toISOString(),
-        responseTimeMs: 0,
-        isFallback: false,
-        context: "[]",
+        question: row.question || "-",
+        answer: row.answer || "-",
+        createdAt: row.time_start || row.time_end || new Date().toISOString(),
+        responseTimeMs: 0, // Kolom ini tidak ada di tabel, gunakan default
+        isFallback: row.isfallback || false, // Perhatikan penulisan isfallback
+        context: row.context || "[]",
         visitorName: "Calon Mahasiswa",
         visitorPhoneNumber: "-",
-        visitorSchoolOrigin: "Sekolah Umum"
+        visitorSchoolOrigin: "-"
       }));
 
       return { pairs, rows };
     });
 
     return NextResponse.json({
-        pairs: data.pairs,
-        messages: data.rows
+        pairs: finalPairs.pairs,
+        messages: finalPairs.rows
     });
-
   } catch (error) {
-    console.error("DEBUG API CHATS:", error); // Lihat error ini di terminal VPS
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    console.error("DEBUG ERROR:", error);
+    return NextResponse.json({ error: "Gagal memuat log" }, { status: 500 });
   }
 }
