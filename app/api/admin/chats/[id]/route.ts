@@ -114,6 +114,9 @@ export async function GET(
       }
 
       // PERBAIKAN PENTING: Jika pairs kosong, berikan minimal 1 objek dummy agar front-end pairs[0] tidak crash membaca undefined
+      // ... (Kode looping pembentukan array pairs di atasnya tetap sama)
+
+      // PERBAIKAN PENTING: Jika pairs kosong, berikan minimal 1 objek dummy agar front-end pairs[0] tidak crash membaca undefined
       if (pairs.length === 0) {
         pairs.push({
           question: "Tidak ada pesan",
@@ -128,14 +131,11 @@ export async function GET(
         });
       }
 
-      return {
-        pairs,
-        messages: rows
-      };
+      // Langsung return array pairs secara polos ke front-end
+      return NextResponse.json(pairs);
     });
 
-    return NextResponse.json(data);
-
+    return data;
   } catch (error) {
     console.error("Error pada API Detail Chats:", error);
     return NextResponse.json(
