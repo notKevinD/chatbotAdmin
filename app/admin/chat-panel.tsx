@@ -17,7 +17,7 @@ export function ChatPanel({
   setCustomEndDate,
   search,
   setSearch,
-  pairs = [], // Berikan default array kosong untuk proteksi tambahan
+  pairs = [], // Perlindungan fallback array kosong bawaan
   chatPagination,
   loadSessions,
   onSelect
@@ -36,7 +36,7 @@ export function ChatPanel({
   pairs: ChatPair[];
   chatPagination: PaginationInfo | null;
   loadSessions: (page?: number) => Promise<void>;
-  onSelect: (sessionId: string, page?: number) => void;
+  onSelect: (sessionId: string, page?: number) => void | Promise<void>;
 }) {
   const [contextPair, setContextPair] = useState<ChatPair | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -51,9 +51,14 @@ export function ChatPanel({
     window.location.href = `/api/admin/chats?${params.toString()}`;
   }
 
-  function handleOpenSession(sessionId: string) {
-    onSelect(sessionId, 1);
-    setIsDetailOpen(true);
+  // PERBAIKAN: Menambahkan async/await agar state pairs terisi sebelum modal dibuka
+  async function handleOpenSession(sessionId: string) {
+    try {
+      await onSelect(sessionId, 1);
+      setIsDetailOpen(true);
+    } catch (error) {
+      console.error("Gagal menyinkronkan data detail obrolan:", error);
+    }
   }
 
   return (
@@ -202,7 +207,7 @@ export function ChatPanel({
               <button className="text-slate-400 hover:text-slate-600 font-bold text-2xl p-1" onClick={() => setIsDetailOpen(false)}>×</button>
             </div>
 
-            {/* Leads Summary Data Box - PERBAIKAN PENGAMAN ARRAY DI SINI */}
+            {/* Leads Summary Data Box */}
             {pairs && pairs.length > 0 && (pairs[0]?.visitorName || pairs[0]?.visitorPhoneNumber || pairs[0]?.visitorSchoolOrigin) && (
               <div className="bg-indigo-50/50 p-4 border-b border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0 text-xs text-slate-700">
                 <div><span className="text-slate-400 block font-medium">Nama Prospek</span><strong>{pairs[0]?.visitorName || "-"}</strong></div>
