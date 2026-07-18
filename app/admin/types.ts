@@ -74,7 +74,7 @@ export type ChatPair = {
   question: string;
   answer: string;
   context?: unknown;
-  responseTimeMs?: number | string | null;
+  responseTimeMs?: number | null; // ← pastikan number
   isFallback?: boolean;
   createdAt?: string;
   visitorName?: string;
@@ -125,7 +125,7 @@ export const rangeLabel: Record<Range, string> = {
   last_month: "Bulan Lalu",
   this_year: "Tahun Ini",
   all: "Selamanya",
-  custom: "Custom"
+  custom: "Custom",
 };
 
 export const reportRangeOptions: Array<{ value: Range; label: string }> = [
@@ -137,5 +137,5 @@ export const reportRangeOptions: Array<{ value: Range; label: string }> = [
   { value: "last_month", label: "Bulan lalu" },
   { value: "this_year", label: "Tahun ini" },
   { value: "all", label: "Selamanya" },
-  { value: "custom", label: "Custom" }
+  { value: "custom", label: "Custom" },
 ];

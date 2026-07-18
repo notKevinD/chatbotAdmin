@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ChatPair,
   ChatSession,
@@ -23,7 +23,7 @@ export function ChatPanel({
   setCustomEndDate,
   search,
   setSearch,
-  pairs: parentPairs = [], // Gunakan alias agar tidak bertabrakan
+  pairs = [], // sekarang digunakan langsung
   chatPagination,
   loadSessions,
   onSelect,
@@ -46,49 +46,71 @@ export function ChatPanel({
 }) {
   const [contextPair, setContextPair] = useState<ChatPair | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
-
-  // STATE BARU: Untuk mengontrol siklus gelembung pesan secara reaktif tanpa crash
-  const [localPairs, setLocalPairs] = useState<ChatPair[]>([]);
+  // State untuk menampilkan loading di modal
   const [isLoadingChat, setIsLoadingChat] = useState(false);
 
-  function exportChatData(type: "ragas" | "data_leads") {
+  // Saat selectedSession berubah, buka modal dan set loading
+  useEffect(() => {
+    if (selectedSession) {
+      setIsDetailOpen(true);
+      // Jika pairs kosong (belum dimuat), set loading true (akan diisi oleh parent)
+      // Namun parent biasanya langsung memuat data via onSelect, kita bisa andalkan prop pairs
+      // Kita set loading false setelah pairs terisi
+    }
+  }, [selectedSession]);
+
+  // Efek untuk menandai loading selesai saat pairs berubah
+  useEffect(() => {
+    if (isDetailOpen && pairs.length > 0) {
+      setIsLoadingChat(false);
+    }
+  }, [pairs, isDetailOpen]);
+
+  const handleOpenSession = (sessionId: string) => {
+    // Panggil onSelect untuk memuat data, parent akan mengupdate pairs
+    setIsLoadingChat(true);
+    onSelect(sessionId, 1);
+    // loading akan mati saat pairs berubah (dari efek di atas)
+  };
+
+  async function exportChatData(type: "ragas" | "data_leads") {
     const params = new URLSearchParams({ export: type, range });
     if (search.trim()) params.set("q", search.trim());
     if (range === "custom") {
       if (customStartDate) params.set("startDate", customStartDate);
       if (customEndDate) params.set("endDate", customEndDate);
     }
-    window.location.href = `/api/admin/chats?${params.toString()}`;
-  }
-
-  // Jauh lebih bersih, reaktif, dan aman dari balapan data asinkronus
-  async function handleOpenSession(sessionId: string) {
-    // 1. Tampilkan status loading segera
-    setIsLoadingChat(true);
-    setIsDetailOpen(true); // Modal terbuka, tapi isinya nanti akan diisi saat data siap
-
     try {
-      // 2. Fetch data secara langsung dari API
-      const res = await fetch(`/api/admin/chats/${sessionId}`);
-      if (!res.ok) throw new Error("Gagal memuat log");
-      const data = await res.json();
-
-      // 3. Update state lokal setelah data diterima
-      if (data) {
-        const targetPairs = data.pairs || data;
-        setLocalPairs(Array.isArray(targetPairs) ? targetPairs : []);
-      }
+      const response = await fetch(`/api/admin/chats?${params.toString()}`);
+      if (!response.ok) throw new Error("Gagal mengunduh data");
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `export-${type}-${new Date().toISOString()}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
     } catch (err) {
-      console.error("Error saat memuat log:", err);
-      setLocalPairs([]); // Reset jika gagal
-    } finally {
-      setIsLoadingChat(false); // Matikan indikator loading
+      console.error("Export error:", err);
+      alert("Gagal mengexport data. Silakan coba lagi.");
     }
   }
 
+  // Data lead dari pasangan pertama (jika ada)
+  const leadInfo =
+    pairs.length > 0
+      ? {
+          visitorName: pairs[0].visitorName,
+          visitorPhoneNumber: pairs[0].visitorPhoneNumber,
+          visitorSchoolOrigin: pairs[0].visitorSchoolOrigin,
+        }
+      : null;
+
   return (
     <div className="flex flex-col gap-6">
-      {/* SECTION 1: FILTER BAR */}
+      {/* SECTION 1: FILTER BAR (sama seperti sebelumnya, hanya perbaikan ekspor) */}
       <section className="report-bar bg-white p-5 border border-slate-200 rounded-xl shadow-sm">
         <div className="report-row flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
           <span className="report-label font-semibold text-slate-800 text-sm">
@@ -201,7 +223,7 @@ export function ChatPanel({
         </div>
       </section>
 
-      {/* SECTION 2: DAFTAR SESSION PENGGUNA */}
+      {/* SECTION 2: DAFTAR SESSION */}
       <section className="table-wrap bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
         <div className="p-5 border-b border-slate-100 bg-slate-50/50">
           <h2 className="text-lg font-bold text-slate-800">
@@ -214,46 +236,42 @@ export function ChatPanel({
 
         <div className="session-list divide-y divide-slate-100">
           {sessions.map((session) => (
-            <div
-              key={session.sessionId}
-              className={`relative w-full text-left transition-all hover:bg-slate-50/80 ${
+            <button
+              className={`w-full text-left p-4 hover:bg-slate-50/80 transition-all flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 ${
                 selectedSession === session.sessionId
                   ? "bg-indigo-50/40 border-l-4 border-indigo-600"
                   : ""
               }`}
+              key={session.sessionId}
+              onClick={() => handleOpenSession(session.sessionId)}
+              type="button"
             >
-              {/* Tombol transparan yang menutupi seluruh area kartu sesi */}
-              <button
-                className="absolute inset-0 w-full h-full z-10 cursor-pointer"
-                onClick={() => handleOpenSession(session.sessionId)}
-                type="button"
-                aria-label={`Lihat sesi ${session.sessionId}`}
-              />
-
-              {/* Konten kartu yang statis (tidak menangkap klik secara langsung) */}
-              <div className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pointer-events-none">
-                <span className="session-main">
-                  <span className="block font-semibold text-slate-800 text-sm">
-                    {session.visitorName || "Tanpa nama"}
-                  </span>
-                  <span className="block text-xs font-mono text-slate-400 mt-0.5">
-                    {session.sessionId}
-                  </span>
+              <span className="session-main">
+                <span className="block font-semibold text-slate-800 text-sm">
+                  {session.visitorName || "Tanpa nama"}
                 </span>
-                <span className="session-meta flex flex-wrap sm:flex-col items-start sm:items-end gap-x-3 text-xs text-slate-500">
-                  <span className="font-medium text-slate-700">
-                    {session.total} pertanyaan
-                  </span>
-                  <span>{formatIndonesianDateTime(session.lastSeen)}</span>
-                  {session.visitorSchoolOrigin && (
-                    <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded text-[10px] mt-0.5 font-medium">
-                      {session.visitorSchoolOrigin}
-                    </span>
-                  )}
+                <span className="block text-xs font-mono text-slate-400 mt-0.5">
+                  {session.sessionId}
                 </span>
-              </div>
-            </div>
+              </span>
+              <span className="session-meta flex flex-wrap sm:flex-col items-start sm:items-end gap-x-3 text-xs text-slate-500">
+                <span className="font-medium text-slate-700">
+                  {session.total} pertanyaan
+                </span>
+                <span>{formatIndonesianDateTime(session.lastSeen)}</span>
+                {session.visitorSchoolOrigin && (
+                  <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded text-[10px] mt-0.5 font-medium">
+                    {session.visitorSchoolOrigin}
+                  </span>
+                )}
+              </span>
+            </button>
           ))}
+          {!sessions.length && (
+            <div className="p-8 text-center text-sm text-slate-400">
+              Belum ada data session.
+            </div>
+          )}
         </div>
         <div className="p-4 border-t border-slate-100 bg-slate-50/30">
           <PaginationControls
@@ -263,9 +281,7 @@ export function ChatPanel({
         </div>
       </section>
 
-      {/* ========================================== */}
-      {/* POP-UP MODAL: DETAIL DIALOG PERCAKAPAN      */}
-      {/* ========================================== */}
+      {/* MODAL DETAIL CHAT */}
       {isDetailOpen && selectedSession && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
           <div
@@ -273,7 +289,7 @@ export function ChatPanel({
             className="bg-white rounded-xl shadow-2xl w-full max-w-3xl h-[85vh] flex flex-col overflow-hidden border border-slate-200"
             role="dialog"
           >
-            {/* Header Modal */}
+            {/* Header */}
             <div className="p-5 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">
@@ -285,135 +301,132 @@ export function ChatPanel({
               </div>
               <button
                 className="text-slate-400 hover:text-slate-600 font-bold text-2xl p-1"
-                onClick={() => setIsDetailOpen(false)}
+                onClick={() => {
+                  setIsDetailOpen(false);
+                  // Opsional: reset selected session di parent? Biarkan parent handle
+                }}
               >
                 ×
               </button>
             </div>
 
-            {/* Leads Summary Data Box - Membaca state reaktif lokal */}
-            {!isLoadingChat &&
-              localPairs.length > 0 &&
-              (localPairs[0]?.visitorName ||
-                localPairs[0]?.visitorPhoneNumber ||
-                localPairs[0]?.visitorSchoolOrigin) && (
-                <div className="bg-indigo-50/50 p-4 border-b border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0 text-xs text-slate-700">
-                  <div>
-                    <span className="text-slate-400 block font-medium">
-                      Nama Prospek
-                    </span>
-                    <strong>{localPairs[0]?.visitorName || "-"}</strong>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block font-medium">
-                      No. Telepon
-                    </span>
-                    <strong>{localPairs[0]?.visitorPhoneNumber || "-"}</strong>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block font-medium">
-                      Asal Institusi/Sekolah
-                    </span>
-                    <strong>{localPairs[0]?.visitorSchoolOrigin || "-"}</strong>
-                  </div>
+            {/* Lead Info */}
+            {!isLoadingChat && leadInfo && (
+              <div className="bg-indigo-50/50 p-4 border-b border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0 text-xs text-slate-700">
+                <div>
+                  <span className="text-slate-400 block font-medium">
+                    Nama Prospek
+                  </span>
+                  <strong>{leadInfo.visitorName || "-"}</strong>
                 </div>
-              )}
+                <div>
+                  <span className="text-slate-400 block font-medium">
+                    No. Telepon
+                  </span>
+                  <strong>{leadInfo.visitorPhoneNumber || "-"}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-400 block font-medium">
+                    Asal Institusi/Sekolah
+                  </span>
+                  <strong>{leadInfo.visitorSchoolOrigin || "-"}</strong>
+                </div>
+              </div>
+            )}
 
-            {/* Body Percakapan Modern Chat Bubble */}
+            {/* Percakapan */}
             <div className="flex-1 overflow-y-auto p-6 bg-slate-50/30 space-y-6">
-              {!isLoadingChat &&
-                localPairs.map((pair, index) => (
-                  <div
-                    key={`${pair.createdAt}-${index}`}
-                    className="space-y-1.5 animate-in fade-in duration-200"
-                  >
-                    <div className="flex justify-between items-center px-1">
-                      <span className="text-[11px] text-slate-400">
-                        {formatIndonesianDateTime(pair.createdAt)}
+              {pairs.map((pair, index) => (
+                <div
+                  key={`${pair.createdAt}-${index}`}
+                  className="space-y-1.5 animate-in fade-in duration-200"
+                >
+                  <div className="flex justify-between items-center px-1">
+                    <span className="text-[11px] text-slate-400">
+                      {formatIndonesianDateTime(pair.createdAt)}
+                    </span>
+                    {pair.isFallback && (
+                      <span className="px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded text-[10px] font-semibold uppercase">
+                        Jawaban Bermasalah
                       </span>
-                      {pair.isFallback && (
-                        <span className="px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded text-[10px] font-semibold uppercase">
-                          Jawaban Bermasalah
+                    )}
+                  </div>
+
+                  {/* User Bubble */}
+                  <div className="flex flex-col items-start max-w-[85%]">
+                    <div className="bg-slate-200 text-slate-800 rounded-2xl rounded-bl-none px-4 py-2.5 shadow-sm text-sm">
+                      <span className="block text-[10px] text-slate-500 font-bold uppercase mb-0.5">
+                        User:
+                      </span>
+                      <p className="whitespace-pre-wrap leading-relaxed">
+                        {pair.question || "-"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Bot Bubble */}
+                  <div className="flex flex-col items-end max-w-[85%] ml-auto">
+                    <div
+                      className={`rounded-2xl rounded-br-none px-4 py-2.5 shadow-sm text-sm ${
+                        pair.isFallback
+                          ? "bg-rose-50 text-rose-950 border border-rose-200"
+                          : "bg-indigo-600 text-white"
+                      }`}
+                    >
+                      <span
+                        className={`block text-[10px] font-bold uppercase mb-0.5 ${pair.isFallback ? "text-rose-500" : "text-indigo-200"}`}
+                      >
+                        Bot AI:
+                      </span>
+                      <p className="whitespace-pre-wrap leading-relaxed">
+                        {pair.answer || "-"}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 mt-1.5 text-xs text-slate-400">
+                      {Number(pair.responseTimeMs) > 0 && (
+                        <span>
+                          Respon:{" "}
+                          {Number(pair.responseTimeMs).toLocaleString("id-ID")}{" "}
+                          ms
                         </span>
                       )}
-                    </div>
-
-                    {/* Bubble User (Left aligned) */}
-                    <div className="flex flex-col items-start max-w-[85%]">
-                      <div className="bg-slate-200 text-slate-800 rounded-2xl rounded-bl-none px-4 py-2.5 shadow-sm text-sm">
-                        <span className="block text-[10px] text-slate-500 font-bold uppercase mb-0.5">
-                          User:
-                        </span>
-                        <p className="whitespace-pre-wrap leading-relaxed">
-                          {pair.question || "-"}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Bubble Bot (Right aligned) */}
-                    <div className="flex flex-col items-end max-w-[85%] ml-auto">
-                      <div
-                        className={`rounded-2xl rounded-br-none px-4 py-2.5 shadow-sm text-sm ${
-                          pair.isFallback
-                            ? "bg-rose-50 text-rose-950 border border-rose-200"
-                            : "bg-indigo-600 text-white"
-                        }`}
-                      >
-                        <span
-                          className={`block text-[10px] font-bold uppercase mb-0.5 ${pair.isFallback ? "text-rose-500" : "text-indigo-200"}`}
+                      {getContextItems(pair.context).length > 0 && (
+                        <button
+                          className="text-indigo-600 hover:text-indigo-800 font-semibold underline bg-transparent"
+                          onClick={() => setContextPair(pair)}
+                          type="button"
                         >
-                          Bot AI:
-                        </span>
-                        <p className="whitespace-pre-wrap leading-relaxed">
-                          {pair.answer || "-"}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-2 mt-1.5 text-xs text-slate-400">
-                        {pair.responseTimeMs != null && (
-                          <span>
-                            Respon:{" "}
-                            {Number(pair.responseTimeMs).toLocaleString(
-                              "id-ID",
-                            )}{" "}
-                            ms
-                          </span>
-                        )}
-                        {getContextItems(pair.context).length ? (
-                          <button
-                            className="text-indigo-600 hover:text-indigo-800 font-semibold underline bg-transparent"
-                            onClick={() => setContextPair(pair)}
-                            type="button"
-                          >
-                            • Lihat Context RAG
-                          </button>
-                        ) : null}
-                      </div>
+                          • Lihat Context RAG
+                        </button>
+                      )}
                     </div>
                   </div>
-                ))}
-
+                </div>
+              ))}
               {isLoadingChat && (
                 <div className="p-12 text-center text-sm text-slate-500 font-medium animate-pulse">
-                  Menghubungkan ke database & memuat log percakapan...
+                  Memuat percakapan...
                 </div>
               )}
-
-              {!isLoadingChat && !localPairs.length && (
+              {!isLoadingChat && pairs.length === 0 && (
                 <div className="p-12 text-center text-sm text-slate-400">
                   Tidak ada pesan terekam dalam sesi ini.
                 </div>
               )}
             </div>
 
-            {/* Footer Modal */}
+            {/* Footer dengan Pagination Chat */}
             <div className="p-4 border-t border-slate-100 bg-white flex flex-col sm:flex-row justify-between items-center gap-3 shrink-0">
               <div className="w-full sm:w-auto">
                 <PaginationControls
                   pagination={chatPagination}
-                  onPageChange={(page) =>
-                    selectedSession && onSelect(selectedSession, page)
-                  }
+                  onPageChange={(page) => {
+                    if (selectedSession) {
+                      setIsLoadingChat(true);
+                      onSelect(selectedSession, page);
+                    }
+                  }}
                 />
               </div>
               <button
@@ -427,12 +440,13 @@ export function ChatPanel({
         </div>
       )}
 
-      {contextPair ? (
+      {/* Context Detail Dialog */}
+      {contextPair && (
         <ContextDetailDialog
           pair={contextPair}
           onClose={() => setContextPair(null)}
         />
-      ) : null}
+      )}
     </div>
   );
 }
