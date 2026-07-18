@@ -17,7 +17,7 @@ export function ChatPanel({
   setCustomEndDate,
   search,
   setSearch,
-  pairs,
+  pairs = [], // Berikan default array kosong untuk proteksi tambahan
   chatPagination,
   loadSessions,
   onSelect
@@ -187,7 +187,7 @@ export function ChatPanel({
       </section>
 
       {/* ========================================== */}
-      {/* POP-UP MODAL: DETAIL DIALOG PERCAKAPAN       */}
+      {/* POP-UP MODAL: DETAIL DIALOG PERCAKAPAN      */}
       {/* ========================================== */}
       {isDetailOpen && selectedSession && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
@@ -202,8 +202,8 @@ export function ChatPanel({
               <button className="text-slate-400 hover:text-slate-600 font-bold text-2xl p-1" onClick={() => setIsDetailOpen(false)}>×</button>
             </div>
 
-            {/* Leads Summary Data Box */}
-            {(pairs[0]?.visitorName || pairs[0]?.visitorPhoneNumber || pairs[0]?.visitorSchoolOrigin) && (
+            {/* Leads Summary Data Box - PERBAIKAN PENGAMAN ARRAY DI SINI */}
+            {pairs && pairs.length > 0 && (pairs[0]?.visitorName || pairs[0]?.visitorPhoneNumber || pairs[0]?.visitorSchoolOrigin) && (
               <div className="bg-indigo-50/50 p-4 border-b border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0 text-xs text-slate-700">
                 <div><span className="text-slate-400 block font-medium">Nama Prospek</span><strong>{pairs[0]?.visitorName || "-"}</strong></div>
                 <div><span className="text-slate-400 block font-medium">No. Telepon</span><strong>{pairs[0]?.visitorPhoneNumber || "-"}</strong></div>
@@ -213,7 +213,7 @@ export function ChatPanel({
 
             {/* Body Percakapan Modern Chat Bubble */}
             <div className="flex-1 overflow-y-auto p-6 bg-slate-50/30 space-y-6">
-              {pairs.map((pair, index) => (
+              {pairs && pairs.map((pair, index) => (
                 <div key={`${pair.createdAt}-${index}`} className="space-y-1.5 animate-in fade-in duration-200">
                   <div className="flex justify-between items-center px-1">
                     <span className="text-[11px] text-slate-400">{formatIndonesianDateTime(pair.createdAt)}</span>
@@ -252,7 +252,7 @@ export function ChatPanel({
                   </div>
                 </div>
               ))}
-              {!pairs.length && <div className="p-12 text-center text-sm text-slate-400">Memuat berkas log percakapan...</div>}
+              {(!pairs || !pairs.length) && <div className="p-12 text-center text-sm text-slate-400">Memuat berkas log percakapan...</div>}
             </div>
 
             {/* Footer Modal dengan Pagination Controls Obrolan */}
