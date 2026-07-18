@@ -46,7 +46,7 @@ export function ChatPanel({
 }) {
   const [contextPair, setContextPair] = useState<ChatPair | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
-  
+
   // STATE BARU: Untuk mengontrol siklus gelembung pesan secara reaktif tanpa crash
   const [localPairs, setLocalPairs] = useState<ChatPair[]>([]);
   const [isLoadingChat, setIsLoadingChat] = useState(false);
@@ -115,7 +115,10 @@ export function ChatPanel({
         {range === "custom" && (
           <div className="custom-date-panel grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 bg-slate-50 border border-slate-200 rounded-lg mb-4 items-end">
             <div className="field compact-field flex flex-col gap-1">
-              <label className="text-xs text-slate-600 font-medium" htmlFor="chatStartDate">
+              <label
+                className="text-xs text-slate-600 font-medium"
+                htmlFor="chatStartDate"
+              >
                 Dari tanggal
               </label>
               <input
@@ -127,7 +130,10 @@ export function ChatPanel({
               />
             </div>
             <div className="field compact-field flex flex-col gap-1">
-              <label className="text-xs text-slate-600 font-medium" htmlFor="chatEndDate">
+              <label
+                className="text-xs text-slate-600 font-medium"
+                htmlFor="chatEndDate"
+              >
                 Sampai tanggal
               </label>
               <input
@@ -185,7 +191,9 @@ export function ChatPanel({
                 event.target.value = "";
               }}
             >
-              <option value="" disabled>Pilih ekspor</option>
+              <option value="" disabled>
+                Pilih ekspor
+              </option>
               <option value="ragas">Ekspor RAGAS</option>
               <option value="data_leads">Ekspor data leads</option>
             </select>
@@ -196,7 +204,9 @@ export function ChatPanel({
       {/* SECTION 2: DAFTAR SESSION PENGGUNA */}
       <section className="table-wrap bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
         <div className="p-5 border-b border-slate-100 bg-slate-50/50">
-          <h2 className="text-lg font-bold text-slate-800">Riwayat Session Pengguna</h2>
+          <h2 className="text-lg font-bold text-slate-800">
+            Riwayat Session Pengguna
+          </h2>
           <p className="text-xs text-slate-500">
             Klik salah satu berkas session untuk mengevaluasi detail obrolan.
           </p>
@@ -204,41 +214,52 @@ export function ChatPanel({
 
         <div className="session-list divide-y divide-slate-100">
           {sessions.map((session) => (
-            <button
-              className={`w-full text-left p-4 hover:bg-slate-50/80 transition-all flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 ${
-                selectedSession === session.sessionId ? "bg-indigo-50/40 border-l-4 border-indigo-600" : ""
-              }`}
+            <div
               key={session.sessionId}
-              onClick={() => handleOpenSession(session.sessionId)}
-              type="button"
+              className={`relative w-full text-left transition-all hover:bg-slate-50/80 ${
+                selectedSession === session.sessionId
+                  ? "bg-indigo-50/40 border-l-4 border-indigo-600"
+                  : ""
+              }`}
             >
-              <span className="session-main">
-                <span className="block font-semibold text-slate-800 text-sm">
-                  {session.visitorName || "Tanpa nama"}
-                </span>
-                <span className="block text-xs font-mono text-slate-400 mt-0.5">
-                  {session.sessionId}
-                </span>
-              </span>
-              <span className="session-meta flex flex-wrap sm:flex-col items-start sm:items-end gap-x-3 text-xs text-slate-500">
-                <span className="font-medium text-slate-700">
-                  {session.total} pertanyaan
-                </span>
-                <span>{formatIndonesianDateTime(session.lastSeen)}</span>
-                {session.visitorSchoolOrigin && (
-                  <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded text-[10px] mt-0.5 font-medium">
-                    {session.visitorSchoolOrigin}
+              {/* Tombol transparan yang menutupi seluruh area kartu sesi */}
+              <button
+                className="absolute inset-0 w-full h-full z-10 cursor-pointer"
+                onClick={() => handleOpenSession(session.sessionId)}
+                type="button"
+                aria-label={`Lihat sesi ${session.sessionId}`}
+              />
+
+              {/* Konten kartu yang statis (tidak menangkap klik secara langsung) */}
+              <div className="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pointer-events-none">
+                <span className="session-main">
+                  <span className="block font-semibold text-slate-800 text-sm">
+                    {session.visitorName || "Tanpa nama"}
                   </span>
-                )}
-              </span>
-            </button>
+                  <span className="block text-xs font-mono text-slate-400 mt-0.5">
+                    {session.sessionId}
+                  </span>
+                </span>
+                <span className="session-meta flex flex-wrap sm:flex-col items-start sm:items-end gap-x-3 text-xs text-slate-500">
+                  <span className="font-medium text-slate-700">
+                    {session.total} pertanyaan
+                  </span>
+                  <span>{formatIndonesianDateTime(session.lastSeen)}</span>
+                  {session.visitorSchoolOrigin && (
+                    <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded text-[10px] mt-0.5 font-medium">
+                      {session.visitorSchoolOrigin}
+                    </span>
+                  )}
+                </span>
+              </div>
+            </div>
           ))}
-          {!sessions.length && (
-            <div className="p-8 text-center text-sm text-slate-400">Belum ada data session.</div>
-          )}
         </div>
         <div className="p-4 border-t border-slate-100 bg-slate-50/30">
-          <PaginationControls pagination={sessionPagination} onPageChange={(page) => loadSessions(page)} />
+          <PaginationControls
+            pagination={sessionPagination}
+            onPageChange={(page) => loadSessions(page)}
+          />
         </div>
       </section>
 
@@ -271,81 +292,113 @@ export function ChatPanel({
             </div>
 
             {/* Leads Summary Data Box - Membaca state reaktif lokal */}
-            {!isLoadingChat && localPairs.length > 0 && (localPairs[0]?.visitorName || localPairs[0]?.visitorPhoneNumber || localPairs[0]?.visitorSchoolOrigin) && (
-              <div className="bg-indigo-50/50 p-4 border-b border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0 text-xs text-slate-700">
-                <div>
-                  <span className="text-slate-400 block font-medium">Nama Prospek</span>
-                  <strong>{localPairs[0]?.visitorName || "-"}</strong>
+            {!isLoadingChat &&
+              localPairs.length > 0 &&
+              (localPairs[0]?.visitorName ||
+                localPairs[0]?.visitorPhoneNumber ||
+                localPairs[0]?.visitorSchoolOrigin) && (
+                <div className="bg-indigo-50/50 p-4 border-b border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0 text-xs text-slate-700">
+                  <div>
+                    <span className="text-slate-400 block font-medium">
+                      Nama Prospek
+                    </span>
+                    <strong>{localPairs[0]?.visitorName || "-"}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block font-medium">
+                      No. Telepon
+                    </span>
+                    <strong>{localPairs[0]?.visitorPhoneNumber || "-"}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block font-medium">
+                      Asal Institusi/Sekolah
+                    </span>
+                    <strong>{localPairs[0]?.visitorSchoolOrigin || "-"}</strong>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-slate-400 block font-medium">No. Telepon</span>
-                  <strong>{localPairs[0]?.visitorPhoneNumber || "-"}</strong>
-                </div>
-                <div>
-                  <span className="text-slate-400 block font-medium">Asal Institusi/Sekolah</span>
-                  <strong>{localPairs[0]?.visitorSchoolOrigin || "-"}</strong>
-                </div>
-              </div>
-            )}
+              )}
 
             {/* Body Percakapan Modern Chat Bubble */}
             <div className="flex-1 overflow-y-auto p-6 bg-slate-50/30 space-y-6">
-              {!isLoadingChat && localPairs.map((pair, index) => (
-                <div key={`${pair.createdAt}-${index}`} className="space-y-1.5 animate-in fade-in duration-200">
-                  <div className="flex justify-between items-center px-1">
-                    <span className="text-[11px] text-slate-400">
-                      {formatIndonesianDateTime(pair.createdAt)}
-                    </span>
-                    {pair.isFallback && (
-                      <span className="px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded text-[10px] font-semibold uppercase">
-                        Jawaban Bermasalah
+              {!isLoadingChat &&
+                localPairs.map((pair, index) => (
+                  <div
+                    key={`${pair.createdAt}-${index}`}
+                    className="space-y-1.5 animate-in fade-in duration-200"
+                  >
+                    <div className="flex justify-between items-center px-1">
+                      <span className="text-[11px] text-slate-400">
+                        {formatIndonesianDateTime(pair.createdAt)}
                       </span>
-                    )}
-                  </div>
-
-                  {/* Bubble User (Left aligned) */}
-                  <div className="flex flex-col items-start max-w-[85%]">
-                    <div className="bg-slate-200 text-slate-800 rounded-2xl rounded-bl-none px-4 py-2.5 shadow-sm text-sm">
-                      <span className="block text-[10px] text-slate-500 font-bold uppercase mb-0.5">User:</span>
-                      <p className="whitespace-pre-wrap leading-relaxed">{pair.question || "-"}</p>
-                    </div>
-                  </div>
-
-                  {/* Bubble Bot (Right aligned) */}
-                  <div className="flex flex-col items-end max-w-[85%] ml-auto">
-                    <div className={`rounded-2xl rounded-br-none px-4 py-2.5 shadow-sm text-sm ${
-                      pair.isFallback ? "bg-rose-50 text-rose-950 border border-rose-200" : "bg-indigo-600 text-white"
-                    }`}>
-                      <span className={`block text-[10px] font-bold uppercase mb-0.5 ${pair.isFallback ? "text-rose-500" : "text-indigo-200"}`}>
-                        Bot AI:
-                      </span>
-                      <p className="whitespace-pre-wrap leading-relaxed">{pair.answer || "-"}</p>
-                    </div>
-
-                    <div className="flex items-center gap-2 mt-1.5 text-xs text-slate-400">
-                      {pair.responseTimeMs != null && (
-                        <span>Respon: {Number(pair.responseTimeMs).toLocaleString("id-ID")} ms</span>
+                      {pair.isFallback && (
+                        <span className="px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded text-[10px] font-semibold uppercase">
+                          Jawaban Bermasalah
+                        </span>
                       )}
-                      {getContextItems(pair.context).length ? (
-                        <button
-                          className="text-indigo-600 hover:text-indigo-800 font-semibold underline bg-transparent"
-                          onClick={() => setContextPair(pair)}
-                          type="button"
+                    </div>
+
+                    {/* Bubble User (Left aligned) */}
+                    <div className="flex flex-col items-start max-w-[85%]">
+                      <div className="bg-slate-200 text-slate-800 rounded-2xl rounded-bl-none px-4 py-2.5 shadow-sm text-sm">
+                        <span className="block text-[10px] text-slate-500 font-bold uppercase mb-0.5">
+                          User:
+                        </span>
+                        <p className="whitespace-pre-wrap leading-relaxed">
+                          {pair.question || "-"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Bubble Bot (Right aligned) */}
+                    <div className="flex flex-col items-end max-w-[85%] ml-auto">
+                      <div
+                        className={`rounded-2xl rounded-br-none px-4 py-2.5 shadow-sm text-sm ${
+                          pair.isFallback
+                            ? "bg-rose-50 text-rose-950 border border-rose-200"
+                            : "bg-indigo-600 text-white"
+                        }`}
+                      >
+                        <span
+                          className={`block text-[10px] font-bold uppercase mb-0.5 ${pair.isFallback ? "text-rose-500" : "text-indigo-200"}`}
                         >
-                          • Lihat Context RAG
-                        </button>
-                      ) : null}
+                          Bot AI:
+                        </span>
+                        <p className="whitespace-pre-wrap leading-relaxed">
+                          {pair.answer || "-"}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 mt-1.5 text-xs text-slate-400">
+                        {pair.responseTimeMs != null && (
+                          <span>
+                            Respon:{" "}
+                            {Number(pair.responseTimeMs).toLocaleString(
+                              "id-ID",
+                            )}{" "}
+                            ms
+                          </span>
+                        )}
+                        {getContextItems(pair.context).length ? (
+                          <button
+                            className="text-indigo-600 hover:text-indigo-800 font-semibold underline bg-transparent"
+                            onClick={() => setContextPair(pair)}
+                            type="button"
+                          >
+                            • Lihat Context RAG
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-              
+                ))}
+
               {isLoadingChat && (
                 <div className="p-12 text-center text-sm text-slate-500 font-medium animate-pulse">
                   Menghubungkan ke database & memuat log percakapan...
                 </div>
               )}
-              
+
               {!isLoadingChat && !localPairs.length && (
                 <div className="p-12 text-center text-sm text-slate-400">
                   Tidak ada pesan terekam dalam sesi ini.
@@ -358,7 +411,9 @@ export function ChatPanel({
               <div className="w-full sm:w-auto">
                 <PaginationControls
                   pagination={chatPagination}
-                  onPageChange={(page) => selectedSession && onSelect(selectedSession, page)}
+                  onPageChange={(page) =>
+                    selectedSession && onSelect(selectedSession, page)
+                  }
                 />
               </div>
               <button
@@ -373,7 +428,10 @@ export function ChatPanel({
       )}
 
       {contextPair ? (
-        <ContextDetailDialog pair={contextPair} onClose={() => setContextPair(null)} />
+        <ContextDetailDialog
+          pair={contextPair}
+          onClose={() => setContextPair(null)}
+        />
       ) : null}
     </div>
   );
