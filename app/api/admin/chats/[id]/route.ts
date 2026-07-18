@@ -15,17 +15,18 @@ export async function GET(request: Request, { params }: { params: { id: string }
 
   try {
     const result = await withClient(async (client) => {
-      const table = "chat_history";
-      const idCol = "session_id";
-      const visitorNameCol = "visitor_name";
-      const phoneCol = "visitor_phone";
-      const schoolCol = "school_origin";
-      const questionCol = "question";
-      const answerCol = "answer";
-      const timeStartCol = "time_start";
-      const timeEndCol = "time_end";
-      const isFallbackCol = "isfallback";
-      const contextCol = "context";
+      // chat_history tidak menyimpan data visitor secara langsung.
+      // Relasinya: chat_history.session_id -> chat_sessions.session_id
+      //            chat_sessions.visitors_id -> visitors.visitor_uuid
+      const questionCol = "h.question";
+      const answerCol = "h.answer";
+      const timeStartCol = "h.time_start";
+      const timeEndCol = "h.time_end";
+      const isFallbackCol = "h.isfallback";
+      const contextCol = "h.context";
+      const visitorNameCol = "v.visitors_name";
+      const phoneCol = "v.visitors_phone_number";
+      const schoolCol = "v.visitor_school_origin";
 
       const query = `
         SELECT 
@@ -38,8 +39,10 @@ export async function GET(request: Request, { params }: { params: { id: string }
           ${visitorNameCol} AS "visitorName",
           ${phoneCol} AS "visitorPhoneNumber",
           ${schoolCol} AS "visitorSchoolOrigin"
-        FROM ${table}
-        WHERE ${idCol} = $1
+        FROM chat_history h
+        LEFT JOIN chat_sessions cs ON cs.session_id = h.session_id
+        LEFT JOIN visitors v ON v.visitor_uuid = cs.visitors_id
+        WHERE h.session_id = $1
         ORDER BY ${timeStartCol} ASC
       `;
       const res = await client.query(query, [sessionId]);

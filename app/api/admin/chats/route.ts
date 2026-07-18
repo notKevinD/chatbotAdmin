@@ -112,14 +112,24 @@ export async function GET(request: Request) {
 
   try {
     const data = await withClient(async (client) => {
-      // Hardcode nama tabel & kolom – sesuaikan dengan skema Anda
-      const table = "chat_history";
-      const idCol = "session_id";
-      const visitorNameCol = "visitor_name";
-      const schoolCol = "school_origin";
-      const updatedCol = "time_start";
-      const questionCol = "question";
-      const answerCol = "answer";
+      // chat_history tidak menyimpan data visitor secara langsung.
+      // Relasinya: chat_history.session_id -> chat_sessions.session_id
+      //            chat_sessions.visitors_id -> visitors.visitor_uuid
+      const historyTable = "chat_history h";
+      const sessionsTable = "chat_sessions cs";
+      const visitorsTable = "visitors v";
+      const idCol = "h.session_id";
+      const visitorNameCol = "v.visitors_name";
+      const schoolCol = "v.visitor_school_origin";
+      const updatedCol = "h.time_start";
+      const questionCol = "h.question";
+      const answerCol = "h.answer";
+
+      const joinClause = `
+        FROM ${historyTable}
+        LEFT JOIN ${sessionsTable} ON cs.session_id = h.session_id
+        LEFT JOIN ${visitorsTable} ON v.visitor_uuid = cs.visitors_id
+      `;
 
       const conditions: string[] = [];
       const params: any[] = [];
@@ -138,7 +148,7 @@ export async function GET(request: Request) {
 
       const countQuery = `
         SELECT COUNT(DISTINCT ${idCol})::int AS total
-        FROM ${table}
+        ${joinClause}
         ${whereClause}
       `;
       const countRes = await client.query(countQuery, params);
@@ -147,18 +157,18 @@ export async function GET(request: Request) {
       const dataQuery = `
         WITH ranked AS (
           SELECT 
-            ${idCol},
+            ${idCol} AS session_id_val,
             ${visitorNameCol} AS "visitorName",
             ${schoolCol} AS "visitorSchoolOrigin",
             ${updatedCol} AS "lastSeen",
             COUNT(*) OVER (PARTITION BY ${idCol}) AS total_messages,
             ROW_NUMBER() OVER (PARTITION BY ${idCol} ORDER BY ${updatedCol} DESC) AS rn
-          FROM ${table}
+          ${joinClause}
           ${whereClause}
         )
         SELECT 
-          ${idCol} AS "sessionId",
-          ${idCol} AS session_id,
+          session_id_val AS "sessionId",
+          session_id_val AS session_id,
           "visitorName",
           "visitorSchoolOrigin",
           "lastSeen",

@@ -77,9 +77,9 @@ export type ChatPair = {
   responseTimeMs?: number | null; // ← pastikan number
   isFallback?: boolean;
   createdAt?: string;
-  visitorName?: string;
-  visitorPhoneNumber?: string;
-  visitorSchoolOrigin?: string;
+  visitorsName?: string;
+  visitorsPhoneNumber?: string;
+  visitorsSchoolOrigin?: string;
 };
 
 export type PaginationInfo = {
