@@ -104,7 +104,7 @@ export async function GET(request: Request) {
       Object.entries(sheetsData).forEach(([sheetName, rows]) => {
         const worksheet = XLSX.utils.json_to_sheet(rows);
         worksheet["!cols"] = [{ wch: 15 }, { wch: 60 }, { wch: 60 }];
-        XXLSX.utils.book_append_sheet(workbook, worksheet, sheetName.substring(0, 31)); // Batasan panjang sheet name XLSX
+        XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.substring(0, 31)); // Batasan panjang sheet name XLSX
       });
 
       return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
