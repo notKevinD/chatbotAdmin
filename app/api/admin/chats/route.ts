@@ -37,15 +37,15 @@ export async function GET(request: Request) {
 
   try {
     const data = await withClient(async (client) => {
-      // 1. Deteksi skema tabel chat secara dinamis (biasanya chat_sessions atau nama serupa)
+      // 1. Deteksi skema tabel chat secara dinamis
       const chatTableInfo = await getColumns(client, "chat_sessions").catch(async () => {
-        // Fallback jika nama tabelnya memakai session_obrolan atau sejenisnya
         return await getColumns(client, "sessions");
       });
 
       const idColumn = pickColumn(chatTableInfo.columns, ["id", "session_id", "sessionId"]);
-      const userColumn = pickColumn(chatTableInfo.columns, ["user_id", "user_identifier", "phone", "email"]);
-      const updatedColumn = pickColumn(chatTableInfo.columns, ["updated_at", "updatedAt", "created_at"]);
+      const userColumn = pickColumn(chatTableInfo.columns, ["user_id", "user_identifier", "phone", "email", "name", "visitor_name"]);
+      const schoolColumn = pickColumn(chatTableInfo.columns, ["school", "school_origin", "visitor_school_origin", "school_name"]);
+      const updatedColumn = pickColumn(chatTableInfo.columns, ["updated_at", "updatedAt", "created_at", "last_seen"]);
 
       if (!idColumn) {
         throw new Error("Kolom identitas unik (ID) tidak ditemukan di tabel chat.");
@@ -60,9 +60,9 @@ export async function GET(request: Request) {
         whereClause += ` and (${userColumn ? `${quoteIdent(userColumn)}::text ilike $1` : "1=1"})`;
       }
 
-      // 3. Eksekusi hitung total rows dan list data sesi chat
+      // 3. Eksekusi hitung total rows menggunakan DISTINCT untuk grup sesi yang unik
       const countRes = await client.query(
-        `select count(*)::int as total from ${chatTableInfo.table.sql} ${whereClause}`,
+        `select count(distinct ${quoteIdent(idColumn)})::int as total from ${chatTableInfo.table.sql} ${whereClause}`,
         queryParams
       );
       const totalRows = countRes.rows[0]?.total || 0;
@@ -71,20 +71,23 @@ export async function GET(request: Request) {
       const offsetIndex = queryParams.length + 2;
       queryParams.push(limit, offset);
 
-      // Cari kueri ini di bagian bawah file chats/route.ts Anda:
+      // 4. Ambil data dengan alias camelCase yang didukung penuh oleh komponen ChatPanel.tsx Anda
       const sessionsRes = await client.query(
         `
           select 
+            distinct on (${quoteIdent(idColumn)})
             ${quoteIdent(idColumn)}::text as id,
-            ${userColumn ? `${quoteIdent(userColumn)}::text` : "'User Anonim'"} as user_display,
-            ${userColumn ? `${quoteIdent(userColumn)}::text` : "'User Anonim'"} as name,
-            ${userColumn ? `${quoteIdent(userColumn)}::text` : "'User Anonim'"} as username,
-            ${userColumn ? `${quoteIdent(userColumn)}::text` : "'User Anonim'"} as user_identifier,
-            ${userColumn ? `${quoteIdent(userColumn)}::text` : "'User Anonim'"} as title,
+            ${quoteIdent(idColumn)}::text as "sessionId",
+            ${quoteIdent(idColumn)}::text as session_id,
+            ${userColumn ? `${quoteIdent(userColumn)}::text` : "'Calon Mahasiswa'"} as "visitorName",
+            ${userColumn ? `${quoteIdent(userColumn)}::text` : "'Calon Mahasiswa'"} as name,
+            ${schoolColumn ? `${quoteIdent(schoolColumn)}::text` : "'Sekolah Umum'"} as "visitorSchoolOrigin",
+            count(*) over (partition by ${quoteIdent(idColumn)})::int as total,
+            ${updatedColumn ? `${quoteIdent(updatedColumn)}::text` : "now()::text"} as "lastSeen",
             ${updatedColumn ? `${quoteIdent(updatedColumn)}::text` : "now()::text"} as updated_at
           from ${chatTableInfo.table.sql}
           ${whereClause}
-          order by ${updatedColumn ? quoteIdent(updatedColumn) : "1"} desc
+          order by ${quoteIdent(idColumn)} asc, ${updatedColumn ? quoteIdent(updatedColumn) : "1"} desc
           limit $${limitIndex}::int offset $${offsetIndex}::int
         `,
         queryParams
