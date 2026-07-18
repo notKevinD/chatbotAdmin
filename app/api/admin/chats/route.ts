@@ -100,6 +100,7 @@ export async function GET(request: Request) {
   }
 
   const url = new URL(request.url);
+  const sessionId = url.searchParams.get("session")?.trim() || "";
   const page = Math.max(1, Number(url.searchParams.get("page") || 1));
   const limit = Math.max(1, Number(url.searchParams.get("limit") || 10));
   const offset = (page - 1) * limit;
@@ -107,28 +108,82 @@ export async function GET(request: Request) {
   const range = url.searchParams.get("range") as Range || "this_week";
   const customStart = url.searchParams.get("startDate") || "";
   const customEnd = url.searchParams.get("endDate") || "";
-
-  const { start, end } = getDateRange(range, customStart, customEnd);
+  const wantsAll = url.searchParams.get("all") === "true";
 
   try {
-    const data = await withClient(async (client) => {
-      // chat_history tidak menyimpan data visitor secara langsung.
-      // Relasinya: chat_history.session_id -> chat_sessions.session_id
-      //            chat_sessions.visitors_id -> visitors.visitor_uuid
-      const historyTable = "chat_history h";
-      const sessionsTable = "chat_sessions cs";
-      const visitorsTable = "visitors v";
-      const idCol = "h.session_id";
-      const visitorNameCol = "v.visitors_name";
-      const schoolCol = "v.visitor_school_origin";
-      const updatedCol = "h.time_start";
-      const questionCol = "h.question";
-      const answerCol = "h.answer";
+    // ─────────────────────────────────────────────────────────
+    // MODE 1: ?session=... → kembalikan pairs (percakapan) + leadInfo
+    // untuk satu session tertentu (dipakai oleh dashboard.tsx & chat-panel.tsx)
+    // ─────────────────────────────────────────────────────────
+    if (sessionId) {
+      const data = await withClient(async (client) => {
+        const query = `
+          SELECT 
+            h.question AS question,
+            h.answer AS answer,
+            h.time_start AS "createdAt",
+            h.time_end AS "timeEnd",
+            h.isfallback AS "isFallback",
+            h.context AS context,
+            v.visitors_name AS "visitorName",
+            v.visitors_phone_number AS "visitorPhoneNumber",
+            v.visitor_school_origin AS "visitorSchoolOrigin"
+          FROM chat_history h
+          LEFT JOIN chat_sessions cs ON cs.session_id = h.session_id
+          LEFT JOIN visitors v ON v.visitor_uuid = cs.visitors_id
+          WHERE h.session_id = $1
+          ORDER BY h.time_start ASC
+        `;
+        const res = await client.query(query, [sessionId]);
+        const rows = res.rows || [];
 
+        const allPairs = rows.map((row) => {
+          let responseTimeMs = 0;
+          if (row.createdAt && row.timeEnd) {
+            const s = new Date(row.createdAt).getTime();
+            const e = new Date(row.timeEnd).getTime();
+            responseTimeMs = Math.max(0, e - s);
+          }
+          return {
+            question: row.question || "-",
+            answer: row.answer || "-",
+            createdAt: row.createdAt || new Date().toISOString(),
+            responseTimeMs,
+            isFallback: row.isFallback || false,
+            context: row.context || "[]",
+            visitorName: row.visitorName || "Calon Mahasiswa",
+            visitorPhoneNumber: row.visitorPhoneNumber || "-",
+            visitorSchoolOrigin: row.visitorSchoolOrigin || "-",
+          };
+        });
+
+        const totalRows = allPairs.length;
+        const pagedPairs = wantsAll ? allPairs : allPairs.slice(offset, offset + limit);
+
+        return {
+          pairs: pagedPairs,
+          pagination: {
+            page,
+            limit,
+            total: totalRows,
+            totalPages: Math.max(Math.ceil(totalRows / limit), 1),
+          },
+        };
+      });
+
+      return NextResponse.json(data);
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // MODE 2: tanpa ?session → daftar session (grouped), dipakai admin-app.tsx
+    // ─────────────────────────────────────────────────────────
+    const { start, end } = getDateRange(range, customStart, customEnd);
+
+    const data = await withClient(async (client) => {
       const joinClause = `
-        FROM ${historyTable}
-        LEFT JOIN ${sessionsTable} ON cs.session_id = h.session_id
-        LEFT JOIN ${visitorsTable} ON v.visitor_uuid = cs.visitors_id
+        FROM chat_history h
+        LEFT JOIN chat_sessions cs ON cs.session_id = h.session_id
+        LEFT JOIN visitors v ON v.visitor_uuid = cs.visitors_id
       `;
 
       const conditions: string[] = [];
@@ -136,18 +191,18 @@ export async function GET(request: Request) {
 
       if (start && end) {
         params.push(start, end);
-        conditions.push(`${updatedCol} BETWEEN $${params.length - 1} AND $${params.length}`);
+        conditions.push(`h.time_start BETWEEN $${params.length - 1} AND $${params.length}`);
       }
 
       if (search) {
         params.push(`%${search}%`);
-        conditions.push(`(${visitorNameCol}::text ILIKE $${params.length} OR ${questionCol}::text ILIKE $${params.length} OR ${answerCol}::text ILIKE $${params.length})`);
+        conditions.push(`(v.visitors_name::text ILIKE $${params.length} OR h.question::text ILIKE $${params.length} OR h.answer::text ILIKE $${params.length})`);
       }
 
       const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
       const countQuery = `
-        SELECT COUNT(DISTINCT ${idCol})::int AS total
+        SELECT COUNT(DISTINCT h.session_id)::int AS total
         ${joinClause}
         ${whereClause}
       `;
@@ -157,12 +212,12 @@ export async function GET(request: Request) {
       const dataQuery = `
         WITH ranked AS (
           SELECT 
-            ${idCol} AS session_id_val,
-            ${visitorNameCol} AS "visitorName",
-            ${schoolCol} AS "visitorSchoolOrigin",
-            ${updatedCol} AS "lastSeen",
-            COUNT(*) OVER (PARTITION BY ${idCol}) AS total_messages,
-            ROW_NUMBER() OVER (PARTITION BY ${idCol} ORDER BY ${updatedCol} DESC) AS rn
+            h.session_id AS session_id_val,
+            v.visitors_name AS "visitorName",
+            v.visitor_school_origin AS "visitorSchoolOrigin",
+            h.time_start AS "lastSeen",
+            COUNT(*) OVER (PARTITION BY h.session_id) AS total_messages,
+            ROW_NUMBER() OVER (PARTITION BY h.session_id ORDER BY h.time_start DESC) AS rn
           ${joinClause}
           ${whereClause}
         )
