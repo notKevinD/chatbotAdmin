@@ -26,12 +26,11 @@ export async function GET(
       const contentColumn = pickColumn(msgTableInfo.columns, ["content", "message", "text_content", "text"]);
       const createdColumn = pickColumn(msgTableInfo.columns, ["created_at", "createdAt", "timestamp"]);
       
-      // Deteksi kolom performa RAG bawaan jika ada
       const latencyColumn = pickColumn(msgTableInfo.columns, ["response_time", "latency", "response_time_ms"]);
       const fallbackColumn = pickColumn(msgTableInfo.columns, ["is_fallback", "fallback"]);
       const contextColumn = pickColumn(msgTableInfo.columns, ["context", "sources", "retrieved_context"]);
 
-      // Deteksi opsional tabel master sessions untuk mengambil data prospek leads
+      // Deteksi tabel master sessions untuk data leads prospek
       const chatTableInfo = await getColumns(client, "chat_sessions").catch(() => null);
       let visitorName = "Calon Mahasiswa";
       let visitorPhone = "-";
@@ -49,7 +48,7 @@ export async function GET(
           );
           if (sessionMeta.rows.length && sessionMeta.rows[0].name) {
             visitorName = sessionMeta.rows[0].name;
-            visitorPhone = sessionMeta.rows[0].name; // Gunakan pengenal jika telepon terpisah
+            visitorPhone = sessionMeta.rows[0].name;
             if (sessionMeta.rows[0].school) visitorSchool = sessionMeta.rows[0].school;
           }
         }
@@ -77,15 +76,13 @@ export async function GET(
         [sessionId]
       );
 
-      // 3. Transformasi baris relasional PostgreSQL menjadi pasangan array ChatPair (Question & Answer) untuk front-end
       const pairs: any[] = [];
       const rows = messagesRes.rows;
 
+      // 3. Transformasi baris relasional PostgreSQL menjadi pasangan array ChatPair (Question & Answer)
       for (let i = 0; i < rows.length; i++) {
-        // Jika baris saat ini adalah pertanyaan dari user
         if (rows[i].role === "user" || rows[i].role === "customer") {
           const nextRow = rows[i + 1];
-          // Cari apakah baris berikutnya adalah jawaban dari bot AI
           const hasBotAnswer = nextRow && (nextRow.role === "assistant" || nextRow.role === "bot" || nextRow.role === "system");
 
           pairs.push({
@@ -100,10 +97,8 @@ export async function GET(
             visitorSchoolOrigin: visitorSchool
           });
 
-          // Loncat satu indeks jika jawaban bot sudah dipasangkan
           if (hasBotAnswer) i++;
         } else {
-          // Jika data di DB tidak berpasangan rapi (misal bot menjawab langsung)
           pairs.push({
             question: "Pertanyaan tidak terekam",
             answer: rows[i].content,
@@ -118,9 +113,24 @@ export async function GET(
         }
       }
 
+      // PERBAIKAN PENTING: Jika pairs kosong, berikan minimal 1 objek dummy agar front-end pairs[0] tidak crash membaca undefined
+      if (pairs.length === 0) {
+        pairs.push({
+          question: "Tidak ada pesan",
+          answer: "Sesi percakapan kosong.",
+          createdAt: new Date().toISOString(),
+          responseTimeMs: 0,
+          isFallback: false,
+          context: "[]",
+          visitorName,
+          visitorPhoneNumber: visitorPhone,
+          visitorSchoolOrigin: visitorSchool
+        });
+      }
+
       return {
         pairs,
-        messages: rows // sertakan fallback kueri dasar
+        messages: rows
       };
     });
 
