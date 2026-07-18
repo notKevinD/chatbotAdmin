@@ -11,16 +11,47 @@ import {
 } from "@/lib/db";
 import * as XLSX from "xlsx";
 
-// Helper internal untuk mengonversi data context ke teks bersih
-function extractTextFromRaw(rawMeta: any, previewText: string): { question: string; answer: string } {
-  const textContent = String(rawMeta?.text || rawMeta?.pageContent || rawMeta?.content || previewText || "");
-  const qMatch = textContent.match(/Pertanyaan:\s*([\s\S]*?)(?=\nJawaban:|$)/);
-  const aMatch = textContent.match(/Jawaban:\s*([\s\S]*)/);
+// Helper internal: ambil field-field (Pertanyaan/Jawaban, atau kolom lain)
+// dari satu baris hasil query, dengan urutan prioritas yang AMAN — tidak
+// menebak-nebak label dari isi teks bebas, karena itu berisiko salah potong
+// kalau isi jawaban kebetulan mengandung tanda ":" (jam buka, URL, alamat,
+// "Catatan: ..." di dalam jawaban, dll).
+//
+// 1) PALING AKURAT: kalau metadata punya field terstruktur eksplisit
+//    (misalnya n8n menyimpan `metadata.fields = { "Kategori": "...", ... }`
+//    saat chunk dibuat), pakai itu APA ADANYA — tidak ada tebak-tebakan sama
+//    sekali, karena n8n yang tahu persis kolom aslinya dari spreadsheet.
+//    Ini kunci untuk dukungan multi-kolom yang benar-benar aman di masa depan.
+// 2) FALLBACK untuk data lama: cari HANYA dua label yang memang sudah pasti
+//    dipakai n8n saat chunking ("Pertanyaan:" dan "Jawaban:"), bukan label
+//    sembarang. Supaya aman, label ini HARUS di awal baris (^) — jadi kalimat
+//    di tengah jawaban yang kebetulan ada titik dua tidak akan salah kepotong.
+function extractFieldsFromChunk(metaRaw: any, fallbackText: string): Record<string, string> {
+  const meta = metaRaw || {};
 
-  return {
-    question: qMatch ? qMatch[1].trim() : textContent,
-    answer: aMatch ? aMatch[1].trim() : ""
-  };
+  // 1) Sumber paling akurat: field terstruktur dari n8n (kalau ada)
+  if (meta.fields && typeof meta.fields === "object" && !Array.isArray(meta.fields)) {
+    const result: Record<string, string> = {};
+    for (const [key, value] of Object.entries(meta.fields)) {
+      result[key] = value === null || value === undefined ? "" : String(value);
+    }
+    if (Object.keys(result).length) return result;
+  }
+
+  // 2) Fallback: HANYA cari "Pertanyaan:" dan "Jawaban:" (label tetap, bukan tebakan)
+  const textContent = String(meta.text || meta.pageContent || meta.content || fallbackText || "");
+  const qMatch = textContent.match(/^Pertanyaan:\s*([\s\S]*?)(?=\nJawaban:|$)/);
+  const aMatch = textContent.match(/\nJawaban:\s*([\s\S]*)/);
+
+  if (qMatch || aMatch) {
+    return {
+      Pertanyaan: qMatch ? qMatch[1].trim() : "",
+      Jawaban: aMatch ? aMatch[1].trim() : ""
+    };
+  }
+
+  // 3) Tidak match pola apapun → satu kolom apa adanya, tanpa tebakan
+  return { Isi: textContent.trim() };
 }
 
 // ========================================================
@@ -189,30 +220,49 @@ export async function GET(request: Request) {
         );
 
         const sheetsData: Record<string, any[]> = {};
+        const sheetFieldOrder: Record<string, string[]> = {};
 
         queryResult.rows.forEach((row) => {
           const sheetName = row.metadata_raw?.sheet || "Sheet1";
-          const { question, answer } = extractTextFromRaw(row.metadata_raw, row.text_content);
+          const fields = extractFieldsFromChunk(row.metadata_raw, row.text_content);
 
           if (!sheetsData[sheetName]) {
             sheetsData[sheetName] = [];
+            sheetFieldOrder[sheetName] = [];
           }
 
-          sheetsData[sheetName].push({
-            "No. Baris Asal": row.metadata_raw?.row || "",
-            "Pertanyaan": question,
-            "Jawaban": answer
-          });
+          // Kumpulkan urutan kolom (union dari semua label yang pernah muncul
+          // di sheet ini), supaya header Excel konsisten walau tidak semua
+          // baris punya field yang sama persis.
+          for (const label of Object.keys(fields)) {
+            if (!sheetFieldOrder[sheetName].includes(label)) {
+              sheetFieldOrder[sheetName].push(label);
+            }
+          }
+
+          sheetsData[sheetName].push(fields);
         });
 
         if (Object.keys(sheetsData).length === 0) {
-          sheetsData["Sheet1"] = [{ "No. Baris Asal": "", "Pertanyaan": "Tidak ada data ditemukan", "Jawaban": "" }];
+          sheetsData["Sheet1"] = [{ Isi: "Tidak ada data ditemukan" }];
+          sheetFieldOrder["Sheet1"] = ["Isi"];
         }
 
         const workbook = XLSX.utils.book_new();
         Object.entries(sheetsData).forEach(([sheetName, rows]) => {
-          const worksheet = XLSX.utils.json_to_sheet(rows);
-          worksheet["!cols"] = [{ wch: 15 }, { wch: 60 }, { wch: 60 }];
+          const columns = sheetFieldOrder[sheetName] || [];
+          // Normalisasi tiap baris supaya semua kolom ada (isi "" kalau baris
+          // itu tidak punya field tersebut), dan urutannya konsisten.
+          const normalizedRows = rows.map((rowFields) => {
+            const normalized: Record<string, string> = {};
+            for (const column of columns) {
+              normalized[column] = rowFields[column] || "";
+            }
+            return normalized;
+          });
+
+          const worksheet = XLSX.utils.json_to_sheet(normalizedRows, { header: columns });
+          worksheet["!cols"] = columns.map(() => ({ wch: 50 }));
           XLSX.utils.book_append_sheet(workbook, worksheet, sheetName.substring(0, 31));
         });
 
@@ -444,8 +494,15 @@ export async function DELETE(request: Request) {
           [String(id)]
         );
 
-        // Refresh statistik index vector (HNSW) setelah penghapusan
-        await client.query("ANALYZE documents");
+        // Refresh statistik index vector (HNSW) setelah penghapusan.
+        // DELETE di atas sudah ter-commit, jadi kalau ANALYZE gagal, itu TIDAK
+        // boleh dilaporkan sebagai "gagal menghapus" — datanya sudah terhapus.
+        // Cukup dicatat di log server saja.
+        try {
+          await client.query("ANALYZE documents");
+        } catch (analyzeError) {
+          console.error("Peringatan: ANALYZE documents gagal setelah delete_chunk (data tetap terhapus):", analyzeError);
+        }
 
         return result.rowCount || 0;
       });
@@ -504,8 +561,14 @@ export async function DELETE(request: Request) {
         );
       }
 
-      // Refresh statistik index HNSW/vector setelah penghapusan massal
-      await client.query("ANALYZE documents");
+      // Refresh statistik index HNSW/vector setelah penghapusan massal.
+      // Sama seperti delete_chunk: kalau ANALYZE gagal, jangan dilaporkan
+      // sebagai "gagal menghapus file" — data sudah ter-commit dihapus.
+      try {
+        await client.query("ANALYZE documents");
+      } catch (analyzeError) {
+        console.error("Peringatan: ANALYZE documents gagal setelah delete_metadata (data tetap terhapus):", analyzeError);
+      }
 
       return deletedDocs;
     });
