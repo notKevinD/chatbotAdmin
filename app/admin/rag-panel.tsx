@@ -153,10 +153,12 @@ export function RagPanel({
     const fullText = `Pertanyaan: ${editQuestion.trim()}\nJawaban: ${editAnswer.trim()}`;
 
     try {
-      const originalSheet =
-        (selectedChunkForEdit.raw as any)?.metadata?.sheet ||
-        (selectedChunkForEdit.raw as any)?.metadata?.["sheet"] ||
-        "Manual_Edited";
+      const originalMetadata = (selectedChunkForEdit.raw as any)?.metadata || {};
+      const originalSheet = originalMetadata.sheet || "Manual_Edited";
+      const originalRow =
+        originalMetadata.row ??
+        originalMetadata.loc?.lines?.from ??
+        null;
 
       await fetchJson("/api/admin/documents", {
         method: "PUT",
@@ -166,6 +168,7 @@ export function RagPanel({
           text: fullText,
           metadataName: selectedChunkForEdit.metadata_name,
           sheet: originalSheet,
+          row: originalRow,
         }),
       });
 

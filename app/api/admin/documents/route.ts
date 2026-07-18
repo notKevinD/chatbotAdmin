@@ -45,7 +45,10 @@ function extractTextFromRaw(rawMeta: any, previewText: string): { question: stri
 //
 // Body yang dikirim Next.js ke n8n selalu punya field "eventType":
 //   - "create_chunk"    { eventType, metadataName, text, sheet }
-//   - "update_chunk"    { eventType, id, text, metadataName, sheet }
+//   - "update_chunk"    { eventType, id, text, metadataName, sheet, row }
+//     ("row" & "sheet" diambil dari metadata ASLI chunk yang sedang diedit,
+//      supaya info baris/sheet sumber tidak hilang saat konten diperbarui.
+//      Untuk chunk yang memang manual/tanpa asal spreadsheet, row = null.)
 //
 // CATATAN: hapus SATU CHUNK maupun hapus SATU FILE PENUH TIDAK lewat n8n —
 // keduanya langsung SQL DELETE + ANALYZE documents di Next.js, karena tidak
@@ -360,7 +363,7 @@ export async function PUT(request: Request) {
   const admin = await getCurrentAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { id, text, metadataName, sheet } = await request.json().catch(() => ({}));
+  const { id, text, metadataName, sheet, row } = await request.json().catch(() => ({}));
   if (!id || !text) {
     return NextResponse.json({ error: "ID chunk dan konten teks baru wajib dikirimkan." }, { status: 400 });
   }
@@ -371,7 +374,8 @@ export async function PUT(request: Request) {
       id: String(id),
       text,
       metadataName,
-      sheet: sheet || "Manual_Edited"
+      sheet: sheet || "Manual_Edited",
+      row: row ?? null
     });
 
     await writeAuditLog({
