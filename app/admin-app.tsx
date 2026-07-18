@@ -202,135 +202,166 @@ export default function AdminApp() {
 
   const title = useMemo(() => {
     if (tab === "dashboard") return "Dashboard Penggunaan";
-    if (tab === "rag") return "Data Chatbot";
-    return "Riwayat Chat";
+    if (tab === "rag") return "Data Chatbot RAG";
+    return "Riwayat Percakapan Memory";
   }, [tab]);
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark" aria-hidden="true">UBL</div>
-          <div>
-            <strong>Universitas Bandar Lampung</strong>
-            <span>Admin Chatbot PMB</span>
+    <div className="flex min-h-screen bg-slate-50 text-slate-800">
+      {/* SIDEBAR NAVIGATION AREA */}
+      <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col justify-between p-5 border-r border-slate-800 shrink-0">
+        <div className="space-y-6">
+          <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
+            <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-black text-sm tracking-tight" aria-hidden="true">UBL</div>
+            <div className="flex flex-col min-w-0">
+              <strong className="text-white text-sm font-bold truncate">Universitas Bandar Lampung</strong>
+              <span className="text-[11px] text-slate-500 font-semibold tracking-wide uppercase mt-0.5">Admin Chatbot PMB</span>
+            </div>
           </div>
-        </div>
-        <nav className="nav" aria-label="Menu admin">
-          <button className={`nav-button ${tab === "dashboard" ? "active" : ""}`} onClick={() => setTab("dashboard")}>
-            Dashboard
-          </button>
-          <button className={`nav-button ${tab === "rag" ? "active" : ""}`} onClick={() => setTab("rag")}>
-            Kelola Basis Pengetahuan AI
-          </button>
-          <button className={`nav-button ${tab === "chat" ? "active" : ""}`} onClick={() => setTab("chat")}>
-            Riwayat Percakapan
-          </button>
-        </nav>
-          <button className="button secondary logout-button" onClick={logout}>
-              Keluar
+          
+          <nav className="flex flex-col gap-1" aria-label="Menu admin">
+            <button 
+              className={`w-full flex items-center px-3 py-2.5 rounded-lg text-xs font-bold transition-all text-left ${
+                tab === "dashboard" ? "bg-indigo-600 text-white shadow-sm" : "hover:bg-slate-800 hover:text-white"
+              }`} 
+              onClick={() => setTab("dashboard")}
+            >
+              Dashboard Laporan
             </button>
+            <button 
+              className={`w-full flex items-center px-3 py-2.5 rounded-lg text-xs font-bold transition-all text-left ${
+                tab === "rag" ? "bg-indigo-600 text-white shadow-sm" : "hover:bg-slate-800 hover:text-white"
+              }`} 
+              onClick={() => setTab("rag")}
+            >
+              Kelola Basis Pengetahuan AI
+            </button>
+            <button 
+              className={`w-full flex items-center px-3 py-2.5 rounded-lg text-xs font-bold transition-all text-left ${
+                tab === "chat" ? "bg-indigo-600 text-white shadow-sm" : "hover:bg-slate-800 hover:text-white"
+              }`} 
+              onClick={() => setTab("chat")}
+            >
+              Riwayat Percakapan
+            </button>
+          </nav>
+        </div>
+
+        <button className="w-full py-2 border border-slate-800 bg-slate-950/40 hover:bg-rose-950/20 hover:border-rose-900 hover:text-rose-400 text-xs font-bold rounded-lg transition-all pt-2 border-t border-slate-800" onClick={logout}>
+          Keluar Panel
+        </button>
       </aside>
 
-      <main className="main">
-        <header className="topbar">
-          <div className="page-title">
-            <h1>{title}</h1>
-            <p className="muted">Database chatbot, webhook n8n, dan chat memory dalam satu panel.</p>
+      {/* MAIN CONTENT WRAPPER */}
+      <main className="flex-1 min-w-0 flex flex-col">
+        <header className="bg-white border-b border-slate-200 px-8 py-5 flex items-center justify-between shrink-0">
+          <div>
+            <h1 className="text-xl font-black text-slate-800 tracking-tight">{title}</h1>
+            <p className="text-xs text-slate-400 mt-0.5 font-medium">Database chatbot, webhook n8n, dan chat memory dalam satu panel terintegrasi.</p>
           </div>
         </header>
 
-        {tab === "dashboard" ? (
-          <div className="report-bar">
-            <div className="report-row">
-              <span className="report-label">Periode laporan</span>
-              <div className="report-pills">
-                {reportRangeOptions.map(({ value, label }) => (
-                  <button
-                    className={`report-pill ${range === value ? "active" : ""}`}
-                    key={value}
-                    onClick={() => setRange(value)}
-                    type="button"
-                  >
-                    {label}
+        <div className="flex-1 overflow-y-auto p-8 space-y-6">
+          {/* TOP REPORT RANGE CONTROLLER PILLS */}
+          {tab === "dashboard" && (
+            <div className="p-4 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col gap-4">
+              <div className="flex flex-wrap items-center gap-3 text-xs">
+                <span className="font-bold text-slate-500 uppercase tracking-wider">Periode Laporan:</span>
+                <div className="flex flex-wrap gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
+                  {reportRangeOptions.map(({ value, label }) => (
+                    <button
+                      className={`px-3 py-1.5 rounded-md font-semibold transition-all ${
+                        range === value ? "bg-white text-indigo-600 shadow-sm" : "text-slate-600 hover:text-slate-900"
+                      }`}
+                      key={value}
+                      onClick={() => setRange(value)}
+                      type="button"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {range === "custom" && (
+                <div className="flex flex-wrap items-end gap-3 p-4 bg-slate-50 rounded-lg border border-slate-200 animate-fadeIn">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-bold text-slate-600" htmlFor="customStartDate">Dari Tanggal</label>
+                    <input
+                      className="border border-slate-300 bg-white text-slate-800 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      id="customStartDate"
+                      type="date"
+                      value={customStartDate}
+                      onChange={(event) => setCustomStartDate(event.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-bold text-slate-600" htmlFor="customEndDate">Sampai Tanggal</label>
+                    <input
+                      className="border border-slate-300 bg-white text-slate-800 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      id="customEndDate"
+                      type="date"
+                      value={customEndDate}
+                      onChange={(event) => setCustomEndDate(event.target.value)}
+                    />
+                  </div>
+                  <button className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-lg shadow-sm transition-all" onClick={loadOverview} type="button">
+                    Terapkan Filter
                   </button>
-                ))}
-              </div>
+                </div>
+              )}
             </div>
-              {range === "custom" ? (
-              <div className="custom-date-panel">
-                <div className="field compact-field">
-                  <label htmlFor="customStartDate">Dari tanggal</label>
-                  <input
-                    className="input date-input"
-                    id="customStartDate"
-                    type="date"
-                    value={customStartDate}
-                    onChange={(event) => setCustomStartDate(event.target.value)}
-                  />
-                </div>
-                <div className="field compact-field">
-                  <label htmlFor="customEndDate">Sampai tanggal</label>
-                  <input
-                    className="input date-input"
-                    id="customEndDate"
-                    type="date"
-                    value={customEndDate}
-                    onChange={(event) => setCustomEndDate(event.target.value)}
-                  />
-                </div>
-                <button className="button secondary" onClick={loadOverview} type="button">
-                  Terapkan
-                </button>
-              </div>
-            ) : null}
+          )}
+
+          {/* STATUS NOTIFICATION AREA */}
+          {error && <DismissibleAlert kind="error" text={error} onClose={() => setError("")} />}
+          {message && <DismissibleAlert kind="success" text={message} onClose={() => setMessage("")} />}
+          {loading && loadingText && <LoadingNotice text={loadingText} />}
+
+          {/* RENDERING SECTIONS ACCORDING TO THE ACTIVE TAB TAB */}
+          <div className="space-y-6">
+            {tab === "dashboard" ? (
+              <Dashboard overview={overview} range={range} />
+            ) : tab === "rag" ? (
+              <RagPanel
+                metadataRows={metadataRows}
+                metadataPagination={metadataPagination}
+                documents={documents}
+                documentPagination={documentPagination}
+                selectedMetadata={selectedMetadata}
+                ragSearch={ragSearch}
+                setRagSearch={setRagSearch}
+                documentSearch={documentSearch}
+                setDocumentSearch={setDocumentSearch}
+                loading={loading}
+                setLoading={setLoading}
+                setLoadingText={setLoadingText}
+                setMessage={setMessage}
+                setError={setError}
+                reload={loadDocuments}
+                loadDetails={loadDocumentDetails}
+              />
+            ) : (
+              <ChatPanel
+                sessions={sessions}
+                sessionPagination={sessionPagination}
+                selectedSession={selectedSession}
+                range={chatRange}
+                setRange={setChatRange}
+                customStartDate={chatCustomStartDate}
+                setCustomStartDate={setChatCustomStartDate}
+                customEndDate={chatCustomEndDate}
+                setCustomEndDate={setChatCustomEndDate}
+                search={chatSearch}
+                setSearch={setChatSearch}
+                pairs={chatPairs}
+                chatPagination={chatPagination}
+                loadSessions={loadSessions}
+                onSelect={loadChatDetail}
+              />
+            )}
           </div>
-        ) : null}
-
-        {error ? <DismissibleAlert kind="error" text={error} onClose={() => setError("")} /> : null}
-        {message ? <DismissibleAlert kind="success" text={message} onClose={() => setMessage("")} /> : null}
-        {loading && loadingText ? <LoadingNotice text={loadingText} /> : null}
-
-        {tab === "dashboard" ? (
-          <Dashboard overview={overview} range={range} />
-        ) : tab === "rag" ? (
-          <RagPanel
-            metadataRows={metadataRows}
-            metadataPagination={metadataPagination}
-            documents={documents}
-            documentPagination={documentPagination}
-            selectedMetadata={selectedMetadata}
-            ragSearch={ragSearch}
-            setRagSearch={setRagSearch}
-            documentSearch={documentSearch}
-            setDocumentSearch={setDocumentSearch}
-            loading={loading}
-            setLoading={setLoading}
-            setLoadingText={setLoadingText}
-            setMessage={setMessage}
-            setError={setError}
-            reload={loadDocuments}
-            loadDetails={loadDocumentDetails}
-          />
-        ) : (
-          <ChatPanel
-            sessions={sessions}
-            sessionPagination={sessionPagination}
-            selectedSession={selectedSession}
-            range={chatRange}
-            setRange={setChatRange}
-            customStartDate={chatCustomStartDate}
-            setCustomStartDate={setChatCustomStartDate}
-            customEndDate={chatCustomEndDate}
-            setCustomEndDate={setChatCustomEndDate}
-            search={chatSearch}
-            setSearch={setChatSearch}
-            pairs={chatPairs}
-            chatPagination={chatPagination}
-            loadSessions={loadSessions}
-            onSelect={loadChatDetail}
-          />
-        )}
+        </div>
       </main>
     </div>
   );

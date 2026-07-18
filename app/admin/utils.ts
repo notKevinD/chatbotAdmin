@@ -100,7 +100,7 @@ export function getContextItems(value: unknown) {
         return { content: String(item ?? ""), metadata: null };
       }
 
-      const record = item as Record<string, unknown>;
+      const record = item as Record<string, any>; // Menggunakan any agar fleksibel saat membaca raw text/content dari RAG
       const content = record.pageContent ?? record.page_content ?? record.content ?? record.text;
       return {
         content: typeof content === "string" ? content : JSON.stringify(record, null, 2),
@@ -112,6 +112,8 @@ export function getContextItems(value: unknown) {
 
 export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
+  
+  // Menangani penanganan error stream jika response kosong/bukan JSON valid
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data.error || "Request gagal.");

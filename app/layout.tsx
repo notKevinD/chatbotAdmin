@@ -3,13 +3,19 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Admin Chatbot PMB | UBL",
-  description: "Panel administrasi chatbot PMB Universitas Bandar Lampung."
+  description: "Panel administrasi chatbot PMB Universitas Bandar Lampung.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="id">
-      <body>{children}</body>
+      <body suppressHydrationWarning={true}>
+        {children}
+      </body>
     </html>
   );
 }

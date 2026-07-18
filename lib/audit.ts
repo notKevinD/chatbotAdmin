@@ -16,25 +16,23 @@ export async function writeAuditLog({
   action: string;
   detail?: Record<string, unknown>;
 }) {
-  await withClient(async (client) => {
-    await client.query(
-      `
-        insert into public.admin_audit_logs (
-          user_id,
+  try {
+    await withClient(async (client) => {
+      await client.query(
+        `
+          insert into public.admin_audit_logs (user_id, action, detail, ip_address, user_agent)
+          values ($1::uuid, $2::text, $3::jsonb, $4::text, $5::text)
+        `,
+        [
+          userId || null,
           action,
-          detail,
-          ip_address,
-          user_agent
-        )
-        values ($1::uuid, $2::text, $3::jsonb, $4::text, $5::text)
-      `,
-      [
-        userId || null,
-        action,
-        JSON.stringify(detail || {}),
-        getIpAddress(request),
-        request.headers.get("user-agent") || ""
-      ]
-    );
-  }).catch(() => undefined);
+          JSON.stringify(detail || {}),
+          getIpAddress(request),
+          request.headers.get("user-agent") || ""
+        ]
+      );
+    });
+  } catch (err) {
+    console.error("Gagal menulis audit log ke database:", err);
+  }
 }

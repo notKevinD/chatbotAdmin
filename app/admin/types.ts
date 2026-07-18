@@ -38,7 +38,7 @@ export type DocumentRow = {
   id: string;
   metadata_name: string;
   preview: string;
-  raw: Record<string, unknown>;
+  raw: Record<string, any>; // Mengubah unknown ke any / Record untuk mempermudah akses property opsional `.text` atau `.sheet`
 };
 
 export type MetadataRow = {
@@ -106,7 +106,7 @@ export type ConfirmDialogState = {
   title: string;
   body: string;
   confirmLabel: string;
-  onConfirm: () => Promise<void>;
+  onConfirm: () => Promise<void> | void; // Menampung async/sync callback
 };
 
 export type DuplicateCheckResponse = {

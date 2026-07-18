@@ -6,7 +6,7 @@ const COOKIE_NAME = "chatbot_admin_session";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 12;
 const SESSION_MAX_AGE_MS = SESSION_MAX_AGE_SECONDS * 1000;
 
-type AdminUser = {
+export type AdminUser = {
   id: string;
   email: string;
   name?: string;
@@ -44,7 +44,7 @@ function assertLoginAllowed(email: string, request: Request) {
   }
 
   if (attempt.count >= 5) {
-    throw new Error("Terlalu banyak percobaan login. Coba lagi beberapa menit.");
+    throw new Error("Terlalu banyak percobaan login. Coba lagi dalam 15 menit.");
   }
 }
 
@@ -77,7 +77,9 @@ export async function createPasswordHash(password: string) {
 }
 
 async function verifyPassword(password: string, storedHash: string) {
-  const [algorithm, n, r, p, saltBase64, hashBase64] = storedHash.split("$");
+  const parts = storedHash.split("$");
+  if (parts.length !== 6) return false;
+  const [algorithm, n, r, p, saltBase64, hashBase64] = parts;
   if (algorithm !== "scrypt" || !n || !r || !p || !saltBase64 || !hashBase64) return false;
 
   const expected = Buffer.from(hashBase64, "base64");
@@ -106,7 +108,6 @@ export async function loginAdmin(email: string, password: string, request: Reque
       `,
       [normalizedEmail]
     );
-
     return result.rows[0];
   });
 
@@ -123,26 +124,15 @@ export async function loginAdmin(email: string, password: string, request: Reque
   await withClient(async (client) => {
     await client.query(
       `
-        insert into public.admin_sessions (
-          user_id,
-          session_token_hash,
-          expires_at,
-          user_agent,
-          ip_address
-        )
+        insert into public.admin_sessions (user_id, session_token_hash, expires_at, user_agent, ip_address)
         values ($1::uuid, $2::text, $3::timestamp, $4::text, $5::text)
       `,
-      [
-        user.id,
-        hashSessionToken(token),
-        expiresAt,
-        request.headers.get("user-agent") || "",
-        getIpAddress(request)
-      ]
+      [user.id, hashSessionToken(token), expiresAt, request.headers.get("user-agent") || "", getIpAddress(request)]
     );
   });
 
-  cookies().set(COOKIE_NAME, token, {
+  const cookieStore = cookies();
+  cookieStore.set(COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
@@ -154,38 +144,38 @@ export async function loginAdmin(email: string, password: string, request: Reque
 }
 
 export async function getCurrentAdmin(): Promise<AdminUser | null> {
-  const token = cookies().get(COOKIE_NAME)?.value;
+  const cookieStore = cookies();
+  const token = cookieStore.get(COOKIE_NAME)?.value;
   if (!token) return null;
 
-  return withClient(async (client) => {
-    const result = await client.query<AdminUser>(
-      `
-        select u.id::text, u.email, u.name, u.role
-        from public.admin_sessions s
-        join public.admin_users u on u.id = s.user_id
-        where s.session_token_hash = $1::text
-          and s.expires_at > now()
-          and u.is_active = true
-        limit 1
-      `,
-      [hashSessionToken(token)]
-    );
-
-    const user = result.rows[0] || null;
-
-    if (user) {
-      await client.query(
+  try {
+    return await withClient(async (client) => {
+      const result = await client.query<AdminUser>(
         `
-          update public.admin_sessions
-          set last_used_at = now()
-          where session_token_hash = $1::text
+          select u.id::text, u.email, u.name, u.role
+          from public.admin_sessions s
+          join public.admin_users u on u.id = s.user_id
+          where s.session_token_hash = $1::text
+            and s.expires_at > now()
+            and u.is_active = true
+          limit 1
         `,
         [hashSessionToken(token)]
       );
-    }
 
-    return user;
-  }).catch(() => null);
+      const user = result.rows[0] || null;
+      if (user) {
+        await client.query(
+          `update public.admin_sessions set last_used_at = now() where session_token_hash = $1::text`,
+          [hashSessionToken(token)]
+        );
+      }
+      return user;
+    });
+  } catch (err) {
+    console.error("Error pada fungsi getCurrentAdmin DB:", err);
+    return null;
+  }
 }
 
 export async function isAuthenticated() {
@@ -193,15 +183,15 @@ export async function isAuthenticated() {
 }
 
 export async function clearAuthCookie() {
-  const token = cookies().get(COOKIE_NAME)?.value;
+  const cookieStore = cookies();
+  const token = cookieStore.get(COOKIE_NAME)?.value;
   if (token) {
     await withClient(async (client) => {
       await client.query(
         `delete from public.admin_sessions where session_token_hash = $1::text`,
         [hashSessionToken(token)]
       );
-    }).catch(() => undefined);
+    }).catch((err) => console.error("Gagal menghapus session dari DB:", err));
   }
-
-  cookies().delete(COOKIE_NAME);
+  cookieStore.delete(COOKIE_NAME);
 }

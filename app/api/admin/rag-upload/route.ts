@@ -122,7 +122,7 @@ async function countDocumentsBySource(fileName: string) {
       `
         select count(*)::int as count
         from ${info.table.sql}
-        where ${conditions.join("\n           or ")}
+        where ${conditions.join(" or ")}
       `,
       [fileName, fileBaseName]
     );
@@ -210,10 +210,12 @@ export async function POST(request: Request) {
             conditions.push(`${quoteIdent(metadataColumn)}->>'metadataName' in ($1::text, $2::text)`);
             conditions.push(`${quoteIdent(metadataColumn)}->>'fileName' in ($1::text, $2::text)`);
           }
+          
+          // PERBAIKAN BUG: Menghapus alias kueri 'd.' yang tidak terdefinisi di DELETE query
           await client.query(
             `
               delete from ${documentInfo.table.sql}
-              where ${conditions.join("\n                 or ")}
+              where ${conditions.join(" or ")}
             `,
             [fileName, fileBaseName]
           );

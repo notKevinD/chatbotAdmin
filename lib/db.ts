@@ -16,7 +16,10 @@ export function getPool() {
 
   if (!global.chatbotPool) {
     global.chatbotPool = new Pool({
-      connectionString
+      connectionString,
+      max: 20, // Membatasi maksimum koneksi pool
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 2000,
     });
   }
 
@@ -93,7 +96,10 @@ export function pickColumn(columns: ColumnInfo[], candidates: string[]) {
 
 export function rowsToJsonExpression(tableAlias: string, columns: ColumnInfo[]) {
   const pairs = columns
-    .filter((column) => column.data_type !== "USER-DEFINED" && column.column_name !== "embedding")
+    .filter((column) => {
+      const type = column.data_type.toUpperCase();
+      return type !== "USER-DEFINED" && column.column_name !== "embedding" && type !== "BYTEA";
+    })
     .map((column) => `'${column.column_name}', ${tableAlias}.${quoteIdent(column.column_name)}`)
     .join(", ");
   return `jsonb_build_object(${pairs || "'empty', null"})`;
@@ -108,7 +114,7 @@ export function formatDbError(error: unknown, fallback: string) {
       .map((item) => (typeof item === "string" ? item : ""))
       .filter(Boolean);
 
-    if (parts.length) return parts.join(" ");
+    if (parts.length) return parts.join(" | ");
     if (candidate.cause) return formatDbError(candidate.cause, fallback);
   }
 

@@ -237,14 +237,14 @@ function buildQuestionSeries(
   const origin = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
   while (cursor < end && buckets.length < 370) {
     const bucketStart = new Date(cursor);
-    let bucketEnd = new Date(cursor);
+    const bucketEnd = new Date(cursor);
 
     if (granularity === "three_hour") bucketEnd.setUTCHours(bucketEnd.getUTCHours() + 3);
     else if (granularity === "week") bucketEnd.setUTCDate(bucketEnd.getUTCDate() + 7);
-    else if (granularity === "month") bucketEnd = addMonths(bucketEnd, 1);
+    else if (granularity === "month") bucketEnd.setUTCMonth(bucketEnd.getUTCMonth() + 1);
     else bucketEnd.setUTCDate(bucketEnd.getUTCDate() + 1);
 
-    if (bucketEnd > end) bucketEnd = new Date(end);
+    const checkEnd = bucketEnd > end ? new Date(end) : bucketEnd;
 
     buckets.push({
       key: getBucketKey(
@@ -258,7 +258,7 @@ function buildQuestionSeries(
               new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), cursor.getUTCDate(), cursor.getUTCHours()))
             )
           : granularity === "week"
-            ? formatWeekLabel(buckets.length + 1, bucketStart, bucketEnd)
+            ? formatWeekLabel(buckets.length + 1, bucketStart, checkEnd)
             : granularity === "month"
               ? formatMonthLabel(new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), 1)))
               : formatSeriesLabel(
@@ -328,18 +328,22 @@ export async function GET(request: Request) {
       const timeColumnType = getColumnType(historyInfo.columns, timeColumn);
       const timeEndColumnType = getColumnType(historyInfo.columns, timeEndColumn);
       const timeSqlCast = getTimestampSqlCast(timeColumnType);
-      const startSql = toStoredSqlTimestamp(filter.start, timeColumnType);
-      const endSql = toStoredSqlTimestamp(filter.end, timeColumnType);
+      
+      const startSql = toStoredSqlTimestamp(filter.start); 
+      const endSql = toStoredSqlTimestamp(filter.end);
       const chatStartExpression = getChatStartExpression(timeColumn, timeEndColumn, timeColumnType, timeEndColumnType);
 
       if (!sessionColumn || !questionColumn || !answerColumn) {
         throw new Error("Tabel chat_history harus memiliki kolom session_id, question, dan answer.");
       }
 
-      const historyWhere = timeColumn && filter.hasTimeFilter
+      const hasValidFilter = !!(timeColumn && filter.hasTimeFilter);
+      const historyWhere = hasValidFilter
         ? `where ${chatStartExpression} >= $1::${timeSqlCast} and ${chatStartExpression} < $2::${timeSqlCast}`
         : "";
-      const timeParams = [startSql, endSql];
+      
+      // Mengunci kepastian array parameter agar tidak terjadi pergeseran argumen kueri PostgreSQL
+      const queryParams = hasValidFilter ? [startSql, endSql] : [];
 
       const [sessionCount, rawHistory] = await Promise.all([
         client.query<{ count: number }>(
@@ -348,7 +352,7 @@ export async function GET(request: Request) {
             from ${historyInfo.table.sql} h
             ${historyWhere}
           `,
-          timeColumn && filter.hasTimeFilter ? timeParams : []
+          queryParams
         ),
         client.query(
           `
@@ -360,7 +364,7 @@ export async function GET(request: Request) {
             ${timeColumn ? `order by ${chatStartExpression} asc` : idColumn ? `order by h.${quoteIdent(idColumn)} asc` : ""}
             limit 10000
           `,
-          timeColumn && filter.hasTimeFilter ? timeParams : []
+          queryParams
         )
       ]);
 
@@ -371,10 +375,12 @@ export async function GET(request: Request) {
           return { raw };
         })
         .filter((item) => asText(item.raw[questionColumn]));
+        
       const seriesBounds =
         filter.range === "all"
           ? getSeriesBounds(questions, timeColumn, filter.start, filter.end)
           : { start: filter.start, end: filter.end };
+          
       const questionSeries = buildQuestionSeries(
         questions,
         timeColumn,
@@ -382,6 +388,7 @@ export async function GET(request: Request) {
         seriesBounds.end,
         filter.granularity
       );
+      
       const unansweredPattern = /\bmaaf\b/i;
       const unansweredPairs = questions
         .filter((item) =>
