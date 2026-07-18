@@ -93,6 +93,35 @@ function getDateRange(range: Range, customStart?: string, customEnd?: string): {
   return { start, end };
 }
 
+// Escape satu nilai untuk field CSV (RFC 4180): bungkus dengan kutip dua
+// jika mengandung koma, kutip dua, atau baris baru; ganda-kan kutip dua di dalamnya.
+function csvEscape(value: unknown) {
+  const text = value === null || value === undefined ? "" : String(value);
+  if (/[",\n\r]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+function toCsv(headers: string[], rows: Array<Array<unknown>>) {
+  const lines = [headers.map(csvEscape).join(",")];
+  for (const row of rows) {
+    lines.push(row.map(csvEscape).join(","));
+  }
+  // Tambahkan BOM agar karakter non-ASCII (misal nama dengan aksen) terbaca benar di Excel
+  return "\uFEFF" + lines.join("\r\n");
+}
+
+function csvResponse(fileName: string, csvContent: string) {
+  return new NextResponse(csvContent, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${fileName}"`
+    }
+  });
+}
+
 export async function GET(request: Request) {
   const admin = await getCurrentAdmin();
   if (!admin) {
@@ -109,8 +138,112 @@ export async function GET(request: Request) {
   const customStart = url.searchParams.get("startDate") || "";
   const customEnd = url.searchParams.get("endDate") || "";
   const wantsAll = url.searchParams.get("all") === "true";
+  const exportType = url.searchParams.get("export") || "";
+
+  const { start, end } = getDateRange(range, customStart, customEnd);
 
   try {
+    // ─────────────────────────────────────────────────────────
+    // MODE 0: ?export=ragas | ?export=data_leads → unduh CSV
+    // ─────────────────────────────────────────────────────────
+    if (exportType === "ragas" || exportType === "data_leads") {
+      const conditions: string[] = [];
+      const params: any[] = [];
+
+      if (start && end) {
+        params.push(start, end);
+        conditions.push(`h.time_start BETWEEN $${params.length - 1} AND $${params.length}`);
+      }
+
+      if (search) {
+        params.push(`%${search}%`);
+        conditions.push(`(v.visitors_name::text ILIKE $${params.length} OR h.question::text ILIKE $${params.length} OR h.answer::text ILIKE $${params.length})`);
+      }
+
+      const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+      const joinClause = `
+        FROM chat_history h
+        LEFT JOIN chat_sessions cs ON cs.session_id = h.session_id
+        LEFT JOIN visitors v ON v.visitor_uuid = cs.visitors_id
+      `;
+
+      if (exportType === "ragas") {
+        const csv = await withClient(async (client) => {
+          const query = `
+            SELECT 
+              h.session_id AS session_id,
+              h.question AS question,
+              h.answer AS answer,
+              h.context AS context,
+              h.isfallback AS isfallback,
+              h.time_start AS time_start,
+              h.time_end AS time_end
+            ${joinClause}
+            ${whereClause}
+            ORDER BY h.time_start ASC
+          `;
+          const res = await client.query(query, params);
+
+          const rows = res.rows.map((row) => {
+            let contextText = "";
+            if (row.context !== null && row.context !== undefined) {
+              contextText = typeof row.context === "string" ? row.context : JSON.stringify(row.context);
+            }
+            return [
+              row.session_id || "",
+              row.question || "",
+              row.answer || "",
+              contextText,
+              row.isfallback ? "true" : "false",
+              row.time_start ? new Date(row.time_start).toISOString() : "",
+              row.time_end ? new Date(row.time_end).toISOString() : ""
+            ];
+          });
+
+          return toCsv(
+            ["session_id", "question", "answer", "context", "isfallback", "time_start", "time_end"],
+            rows
+          );
+        });
+
+        return csvResponse(`export-ragas-${new Date().toISOString()}.csv`, csv);
+      }
+
+      // exportType === "data_leads"
+      const csv = await withClient(async (client) => {
+        const query = `
+          SELECT 
+            h.session_id AS session_id,
+            v.visitors_name AS visitor_name,
+            v.visitors_phone_number AS visitor_phone_number,
+            v.visitor_school_origin AS visitor_school_origin,
+            COUNT(*) AS total_pertanyaan,
+            MAX(h.time_start) AS last_seen
+          ${joinClause}
+          ${whereClause}
+          GROUP BY h.session_id, v.visitors_name, v.visitors_phone_number, v.visitor_school_origin
+          ORDER BY last_seen DESC
+        `;
+        const res = await client.query(query, params);
+
+        const rows = res.rows.map((row) => [
+          row.session_id || "",
+          row.visitor_name || "",
+          row.visitor_phone_number || "",
+          row.visitor_school_origin || "",
+          row.total_pertanyaan || 0,
+          row.last_seen ? new Date(row.last_seen).toISOString() : ""
+        ]);
+
+        return toCsv(
+          ["session_id", "nama", "no_telepon", "asal_sekolah", "total_pertanyaan", "last_seen"],
+          rows
+        );
+      });
+
+      return csvResponse(`export-data_leads-${new Date().toISOString()}.csv`, csv);
+    }
+
     // ─────────────────────────────────────────────────────────
     // MODE 1: ?session=... → kembalikan pairs (percakapan) + leadInfo
     // untuk satu session tertentu (dipakai oleh dashboard.tsx & chat-panel.tsx)
@@ -177,8 +310,6 @@ export async function GET(request: Request) {
     // ─────────────────────────────────────────────────────────
     // MODE 2: tanpa ?session → daftar session (grouped), dipakai admin-app.tsx
     // ─────────────────────────────────────────────────────────
-    const { start, end } = getDateRange(range, customStart, customEnd);
-
     const data = await withClient(async (client) => {
       const joinClause = `
         FROM chat_history h
