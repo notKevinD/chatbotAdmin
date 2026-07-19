@@ -47,6 +47,7 @@ export type MetadataRow = {
   document_count: number;
   status?: string;
   error_message?: string;
+  columns?: Record<string, string[]> | null;
 };
 
 export type DocumentsResponse = {

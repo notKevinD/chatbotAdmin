@@ -13,10 +13,16 @@ function splitFileName(fileName: string) {
   };
 }
 
+// columnsBySheet: { [sheetName]: string[] } — header kolom tiap sheet, dikirim
+// dari frontend (hasil parsing SheetJS sebelum file diupload ke n8n). Disimpan
+// LANGSUNG oleh backend Next.js, TIDAK bergantung pada n8n mengetahui struktur
+// file ini — jadi "kolom apa saja" selalu bisa diketahui walau n8n belum/tidak
+// mengembalikan info itu.
 async function upsertMetadataStatus(
   uploadFileName: string,
   status: "processing" | "success" | "failed",
-  errorMessage?: string
+  errorMessage?: string,
+  columnsBySheet?: Record<string, string[]>
 ) {
   await withClient(async (client) => {
     const info = await getColumns(client, "metadata_table");
@@ -24,6 +30,7 @@ async function upsertMetadataStatus(
     const statusColumn = pickColumn(info.columns, ["status", "upload_status"]);
     const errorColumn = pickColumn(info.columns, ["error_message", "errorMessage", "last_error"]);
     const updatedColumn = pickColumn(info.columns, ["updated_at", "updatedAt"]);
+    const columnsColumn = pickColumn(info.columns, ["columns", "column_list", "headers"]);
 
     if (!nameColumn) return;
 
@@ -50,6 +57,14 @@ async function upsertMetadataStatus(
     if (errorColumn) {
       params.push(errorMessage || "");
       sets.push(`${quoteIdent(errorColumn)} = nullif($${params.length}::text, '')`);
+    }
+
+    // Simpan struktur kolom cuma kalau memang dikirim (biasanya sekali, saat
+    // status "processing" pertama kali) — supaya tidak menimpa data yang
+    // sudah ada dengan null saat status di-update ke "success"/"failed".
+    if (columnsColumn && columnsBySheet) {
+      params.push(JSON.stringify(columnsBySheet));
+      sets.push(`${quoteIdent(columnsColumn)} = $${params.length}::jsonb`);
     }
 
     if (updatedColumn) {
@@ -167,6 +182,22 @@ export async function POST(request: Request) {
   const mode: UploadMode =
     requestedMode === "overwrite" || requestedMode === "duplicate" ? requestedMode : "reject";
 
+  // Struktur kolom (header) tiap sheet, dikirim frontend hasil parsing SheetJS
+  // SEBELUM file dikirim ke n8n. Ini disimpan backend sendiri ke metadata_table,
+  // independen dari apapun yang n8n lakukan/kembalikan.
+  const columnsBySheetRaw = String(incoming.get("columnsBySheet") || "");
+  let columnsBySheet: Record<string, string[]> | undefined;
+  if (columnsBySheetRaw) {
+    try {
+      const parsed = JSON.parse(columnsBySheetRaw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        columnsBySheet = parsed;
+      }
+    } catch {
+      columnsBySheet = undefined;
+    }
+  }
+
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "File Excel wajib dipilih." }, { status: 400 });
   }
@@ -210,8 +241,7 @@ export async function POST(request: Request) {
             conditions.push(`${quoteIdent(metadataColumn)}->>'metadataName' in ($1::text, $2::text)`);
             conditions.push(`${quoteIdent(metadataColumn)}->>'fileName' in ($1::text, $2::text)`);
           }
-          
-          // PERBAIKAN BUG: Menghapus alias kueri 'd.' yang tidak terdefinisi di DELETE query
+
           await client.query(
             `
               delete from ${documentInfo.table.sql}
@@ -239,7 +269,7 @@ export async function POST(request: Request) {
     const form = new FormData();
     form.set("file", uploadFile);
 
-    await upsertMetadataStatus(uploadFileName, "processing");
+    await upsertMetadataStatus(uploadFileName, "processing", undefined, columnsBySheet);
 
     const response = await fetch(webhook, {
       method: "POST",

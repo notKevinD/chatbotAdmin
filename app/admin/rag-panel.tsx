@@ -75,13 +75,62 @@ export function RagPanel({
   const [selectedChunkForEdit, setSelectedChunkForEdit] =
     useState<DocumentRow | null>(null);
 
-  // Form Field States
+  // Form Field States — sekarang DINAMIS mengikuti struktur kolom file
+  // (metadataRows[...].columns), bukan cuma Pertanyaan/Jawaban tetap. Kalau
+  // file tidak punya info kolom tersimpan (file lama sebelum fitur ini ada),
+  // otomatis fallback ke 2 kolom lama.
   const [targetMetadata, setTargetMetadata] = useState("");
-  const [newQuestion, setNewQuestion] = useState("");
-  const [newAnswer, setNewAnswer] = useState("");
-  const [editQuestion, setEditQuestion] = useState("");
-  const [editAnswer, setEditAnswer] = useState("");
+  const [targetSheet, setTargetSheet] = useState("");
+  const [dynamicFields, setDynamicFields] = useState<Record<string, string>>({});
+  const [editColumns, setEditColumns] = useState<string[]>(["Pertanyaan", "Jawaban"]);
+  const [editFields, setEditFields] = useState<Record<string, string>>({});
   const [submittingModal, setSubmittingModal] = useState(false);
+
+  const DEFAULT_LEGACY_COLUMNS = ["Pertanyaan", "Jawaban"];
+
+  function getSheetsForMetadata(metadataName: string): string[] {
+    const row = metadataRows.find((r) => r.metadata_name === metadataName);
+    if (!row?.columns) return [];
+    return Object.keys(row.columns);
+  }
+
+  function getColumnsForSheet(metadataName: string, sheetName: string): string[] {
+    const row = metadataRows.find((r) => r.metadata_name === metadataName);
+    if (!row?.columns) return DEFAULT_LEGACY_COLUMNS;
+    const sheets = Object.keys(row.columns);
+    if (!sheets.length) return DEFAULT_LEGACY_COLUMNS;
+    const pickedSheet = sheetName && row.columns[sheetName] ? sheetName : sheets[0];
+    const cols = row.columns[pickedSheet];
+    return cols && cols.length ? cols : DEFAULT_LEGACY_COLUMNS;
+  }
+
+  const addAvailableSheets = targetMetadata ? getSheetsForMetadata(targetMetadata) : [];
+  const addColumns = targetMetadata
+    ? getColumnsForSheet(targetMetadata, targetSheet)
+    : DEFAULT_LEGACY_COLUMNS;
+
+  function handleTargetMetadataChange(metadataName: string) {
+    setTargetMetadata(metadataName);
+    const sheets = getSheetsForMetadata(metadataName);
+    const firstSheet = sheets[0] || "";
+    setTargetSheet(firstSheet);
+    const cols = getColumnsForSheet(metadataName, firstSheet);
+    const emptyFields: Record<string, string> = {};
+    cols.forEach((col) => {
+      emptyFields[col] = "";
+    });
+    setDynamicFields(emptyFields);
+  }
+
+  function handleTargetSheetChange(sheetName: string) {
+    setTargetSheet(sheetName);
+    const cols = getColumnsForSheet(targetMetadata, sheetName);
+    const emptyFields: Record<string, string> = {};
+    cols.forEach((col) => {
+      emptyFields[col] = "";
+    });
+    setDynamicFields(emptyFields);
+  }
 
   function clearSelectedFile() {
     setFile(null);
@@ -103,12 +152,19 @@ export function RagPanel({
   // Tambah Chunk Data Baru secara Manual ke DB & n8n
   async function handleCreateManualChunk(e: React.FormEvent) {
     e.preventDefault();
-    if (!targetMetadata || !newQuestion.trim() || !newAnswer.trim()) return;
+    if (!targetMetadata) return;
+    const hasEmptyField = addColumns.some((col) => !dynamicFields[col]?.trim());
+    if (hasEmptyField) return;
 
     setSubmittingModal(true);
     setError("");
     setMessage("");
-    const fullText = `Pertanyaan: ${newQuestion.trim()}\nJawaban: ${newAnswer.trim()}`;
+
+    const fieldsPayload: Record<string, string> = {};
+    addColumns.forEach((col) => {
+      fieldsPayload[col] = (dynamicFields[col] || "").trim();
+    });
+    const fullText = addColumns.map((col) => `${col}: ${fieldsPayload[col]}`).join("\n");
 
     try {
       await fetchJson("/api/admin/documents", {
@@ -117,13 +173,14 @@ export function RagPanel({
         body: JSON.stringify({
           metadataName: targetMetadata,
           text: fullText,
-          sheet: "Manual_Added",
+          sheet: targetSheet || "Manual_Added",
+          columns: addColumns,
+          fields: fieldsPayload,
         }),
       });
 
       setMessage("Data pengetahuan baru berhasil ditambahkan secara manual.");
-      setNewQuestion("");
-      setNewAnswer("");
+      setDynamicFields({});
       setIsAddModalOpen(false);
 
       await reload(metadataPagination?.page || 1);
@@ -144,13 +201,19 @@ export function RagPanel({
   // Edit Segmen Chunk Data & Update Embedding Vector Store via n8n
   async function handleUpdateManualChunk(e: React.FormEvent) {
     e.preventDefault();
-    if (!selectedChunkForEdit || !editQuestion.trim() || !editAnswer.trim())
-      return;
+    if (!selectedChunkForEdit) return;
+    const hasEmptyField = editColumns.some((col) => !editFields[col]?.trim());
+    if (hasEmptyField) return;
 
     setSubmittingModal(true);
     setError("");
     setMessage("");
-    const fullText = `Pertanyaan: ${editQuestion.trim()}\nJawaban: ${editAnswer.trim()}`;
+
+    const fieldsPayload: Record<string, string> = {};
+    editColumns.forEach((col) => {
+      fieldsPayload[col] = (editFields[col] || "").trim();
+    });
+    const fullText = editColumns.map((col) => `${col}: ${fieldsPayload[col]}`).join("\n");
 
     try {
       const originalMetadata = (selectedChunkForEdit.raw as any)?.metadata || {};
@@ -169,6 +232,8 @@ export function RagPanel({
           metadataName: selectedChunkForEdit.metadata_name,
           sheet: originalSheet,
           row: originalRow,
+          columns: editColumns,
+          fields: fieldsPayload,
         }),
       });
 
@@ -247,6 +312,13 @@ export function RagPanel({
     const form = new FormData();
     form.set("file", file);
     form.set("mode", mode);
+    if (excelPreview?.sheets?.length) {
+      const columnsBySheet: Record<string, string[]> = {};
+      for (const sheet of excelPreview.sheets) {
+        columnsBySheet[sheet.sheetName] = sheet.headers;
+      }
+      form.set("columnsBySheet", JSON.stringify(columnsBySheet));
+    }
 
     try {
       const result = await fetchJson<{ documentCount?: number }>(
@@ -552,7 +624,7 @@ export function RagPanel({
             <button
               className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs rounded-lg shadow-sm flex items-center gap-1"
               onClick={() => {
-                if (selectedMetadata) setTargetMetadata(selectedMetadata);
+                if (selectedMetadata) handleTargetMetadataChange(selectedMetadata);
                 setIsAddModalOpen(true);
               }}
             >
@@ -710,19 +782,37 @@ export function RagPanel({
                       className="px-2 py-1 text-xs font-semibold rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-700"
                       onClick={() => {
                         setSelectedChunkForEdit(row);
-                        const textContent = String(
-                          row.raw?.text || row.preview || "",
-                        );
-                        const qMatch = textContent.match(
-                          /Pertanyaan:\s*([\s\S]*?)(?=\nJawaban:|$)/,
-                        );
-                        const aMatch =
-                          textContent.match(/Jawaban:\s*([\s\S]*)/);
+                        const rawMeta = (row.raw as any)?.metadata;
+                        const rawFields = rawMeta?.fields;
 
-                        setEditQuestion(
-                          qMatch ? qMatch[1].trim() : textContent,
-                        );
-                        setEditAnswer(aMatch ? aMatch[1].trim() : "");
+                        if (rawFields && typeof rawFields === "object" && !Array.isArray(rawFields)) {
+                          // Paling akurat: chunk ini sudah punya field terstruktur
+                          const cols = Array.isArray(rawMeta?.columns) && rawMeta.columns.length
+                            ? rawMeta.columns
+                            : Object.keys(rawFields);
+                          const values: Record<string, string> = {};
+                          cols.forEach((col: string) => {
+                            values[col] = String(rawFields[col] ?? "");
+                          });
+                          setEditColumns(cols);
+                          setEditFields(values);
+                        } else {
+                          // Fallback data lama: cari HANYA label "Pertanyaan:"/"Jawaban:" tetap
+                          // (bukan tebakan generik) — anti salah potong isi jawaban yang ada ":"-nya
+                          const textContent = String(
+                            (row.raw as any)?.text || row.preview || "",
+                          );
+                          const qMatch = textContent.match(
+                            /^Pertanyaan:\s*([\s\S]*?)(?=\nJawaban:|$)/,
+                          );
+                          const aMatch = textContent.match(/\nJawaban:\s*([\s\S]*)/);
+                          setEditColumns(["Pertanyaan", "Jawaban"]);
+                          setEditFields({
+                            Pertanyaan: qMatch ? qMatch[1].trim() : textContent.trim(),
+                            Jawaban: aMatch ? aMatch[1].trim() : "",
+                          });
+                        }
+
                         setIsEditModalOpen(true);
                       }}
                     >
@@ -794,7 +884,7 @@ export function RagPanel({
                 <select
                   className="w-full border border-slate-300 bg-white text-slate-800 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500"
                   value={targetMetadata}
-                  onChange={(e) => setTargetMetadata(e.target.value)}
+                  onChange={(e) => handleTargetMetadataChange(e.target.value)}
                   required
                 >
                   <option value="" disabled>
@@ -808,33 +898,46 @@ export function RagPanel({
                 </select>
               </div>
 
-              <div className="field flex flex-col gap-1">
-                <label className="text-xs font-semibold text-slate-700">
-                  Pertanyaan
-                </label>
-                <textarea
-                  rows={3}
-                  className="w-full border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-800"
-                  placeholder="Ketik pertanyaan RAG..."
-                  value={newQuestion}
-                  onChange={(e) => setNewQuestion(e.target.value)}
-                  required
-                />
-              </div>
+              {targetMetadata && addAvailableSheets.length > 1 && (
+                <div className="field flex flex-col gap-1">
+                  <label className="text-xs font-semibold text-slate-700">
+                    Pilih Sheet
+                  </label>
+                  <select
+                    className="w-full border border-slate-300 bg-white text-slate-800 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500"
+                    value={targetSheet}
+                    onChange={(e) => handleTargetSheetChange(e.target.value)}
+                  >
+                    {addAvailableSheets.map((sheetName) => (
+                      <option key={sheetName} value={sheetName}>
+                        {sheetName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
-              <div className="field flex flex-col gap-1">
-                <label className="text-xs font-semibold text-slate-700">
-                  Jawaban
-                </label>
-                <textarea
-                  rows={3}
-                  className="w-full border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-800"
-                  placeholder="Ketik jawaban RAG..."
-                  value={newAnswer}
-                  onChange={(e) => setNewAnswer(e.target.value)}
-                  required
-                />
-              </div>
+              {targetMetadata &&
+                addColumns.map((col) => (
+                  <div key={col} className="field flex flex-col gap-1">
+                    <label className="text-xs font-semibold text-slate-700">
+                      {col}
+                    </label>
+                    <textarea
+                      rows={3}
+                      className="w-full border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-800"
+                      placeholder={`Ketik isi ${col}...`}
+                      value={dynamicFields[col] || ""}
+                      onChange={(e) =>
+                        setDynamicFields((prev) => ({
+                          ...prev,
+                          [col]: e.target.value,
+                        }))
+                      }
+                      required
+                    />
+                  </div>
+                ))}
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
@@ -897,31 +1000,25 @@ export function RagPanel({
                 />
               </div>
 
-              <div className="field flex flex-col gap-1">
-                <label className="text-xs font-semibold text-slate-700">
-                  Pertanyaan
-                </label>
-                <textarea
-                  rows={3}
-                  className="w-full border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-800"
-                  value={editQuestion}
-                  onChange={(e) => setEditQuestion(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="field flex flex-col gap-1">
-                <label className="text-xs font-semibold text-slate-700">
-                  Jawaban
-                </label>
-                <textarea
-                  rows={3}
-                  className="w-full border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-800"
-                  value={editAnswer}
-                  onChange={(e) => setEditAnswer(e.target.value)}
-                  required
-                />
-              </div>
+              {editColumns.map((col) => (
+                <div key={col} className="field flex flex-col gap-1">
+                  <label className="text-xs font-semibold text-slate-700">
+                    {col}
+                  </label>
+                  <textarea
+                    rows={3}
+                    className="w-full border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-800"
+                    value={editFields[col] || ""}
+                    onChange={(e) =>
+                      setEditFields((prev) => ({
+                        ...prev,
+                        [col]: e.target.value,
+                      }))
+                    }
+                    required
+                  />
+                </div>
+              ))}
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
                 <button

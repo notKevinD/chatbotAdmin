@@ -29,10 +29,19 @@ import * as XLSX from "xlsx";
 function extractFieldsFromChunk(metaRaw: any, fallbackText: string): Record<string, string> {
   const meta = metaRaw || {};
 
-  // 1) Sumber paling akurat: field terstruktur dari n8n (kalau ada)
+  // 1) Sumber paling akurat: field terstruktur dari n8n (kalau ada).
+  //    Kalau metadata juga punya `columns` (array urutan nama kolom asli),
+  //    urutan itu dipakai supaya kolom Excel hasil export PERSIS sama urutan
+  //    kolom sumbernya — tidak bergantung urutan key di object JSON.
   if (meta.fields && typeof meta.fields === "object" && !Array.isArray(meta.fields)) {
+    const orderedKeys: string[] =
+      Array.isArray(meta.columns) && meta.columns.length
+        ? meta.columns.filter((key: string) => Object.prototype.hasOwnProperty.call(meta.fields, key))
+        : Object.keys(meta.fields);
+
     const result: Record<string, string> = {};
-    for (const [key, value] of Object.entries(meta.fields)) {
+    for (const key of orderedKeys) {
+      const value = meta.fields[key];
       result[key] = value === null || value === undefined ? "" : String(value);
     }
     if (Object.keys(result).length) return result;
@@ -75,11 +84,12 @@ function extractFieldsFromChunk(metaRaw: any, fallbackText: string): Record<stri
 //      error yang jelas ke admin (bukan hang selamanya) — lihat callN8nCrudWebhook().
 //
 // Body yang dikirim Next.js ke n8n selalu punya field "eventType":
-//   - "create_chunk"    { eventType, metadataName, text, sheet }
-//   - "update_chunk"    { eventType, id, text, metadataName, sheet, row }
-//     ("row" & "sheet" diambil dari metadata ASLI chunk yang sedang diedit,
-//      supaya info baris/sheet sumber tidak hilang saat konten diperbarui.
-//      Untuk chunk yang memang manual/tanpa asal spreadsheet, row = null.)
+//   - "create_chunk"    { eventType, metadataName, text, sheet, columns, fields }
+//   - "update_chunk"    { eventType, id, text, metadataName, sheet, row, columns, fields }
+//     ("columns" = daftar nama kolom sesuai struktur file aslinya, "fields" =
+//      isi tiap kolom untuk baris ini. n8n TINGGAL PAKAI ini apa adanya untuk
+//      membentuk metadata.columns/metadata.fields di tabel documents — tidak
+//      perlu menebak struktur dari teks "text" sama sekali.)
 //
 // CATATAN: hapus SATU CHUNK maupun hapus SATU FILE PENUH TIDAK lewat n8n —
 // keduanya langsung SQL DELETE + ANALYZE documents di Next.js, karena tidak
@@ -192,6 +202,7 @@ export async function GET(request: Request) {
       const metadataCreatedColumn = pickColumn(metadataInfo.columns, ["created_at", "createdAt", "date"]);
       const metadataStatusColumn = pickColumn(metadataInfo.columns, ["status", "upload_status"]);
       const metadataErrorColumn = pickColumn(metadataInfo.columns, ["error_message", "errorMessage", "last_error"]);
+      const metadataColumnsColumn = pickColumn(metadataInfo.columns, ["columns", "column_list", "headers"]);
 
       if (!metadataNameColumn) {
         throw new Error("Kolom metadata_name tidak ditemukan di metadata_table.");
@@ -289,6 +300,7 @@ export async function GET(request: Request) {
                 ${metadataCreatedColumn ? `mt.${quoteIdent(metadataCreatedColumn)}::text` : "null"} as created_at,
                 ${metadataStatusColumn ? `mt.${quoteIdent(metadataStatusColumn)}::text` : "'unknown'"} as status,
                 ${metadataErrorColumn ? `mt.${quoteIdent(metadataErrorColumn)}::text` : "null"} as error_message,
+                ${metadataColumnsColumn ? `mt.${quoteIdent(metadataColumnsColumn)}` : "null"} as columns,
                 count(d.${quoteIdent(idColumn || "id")})::int as document_count
               from ${metadataInfo.table.sql} mt
               left join ${info.table.sql} d
@@ -298,6 +310,7 @@ export async function GET(request: Request) {
                 ${metadataCreatedColumn ? `, mt.${quoteIdent(metadataCreatedColumn)}` : ""}
                 ${metadataStatusColumn ? `, mt.${quoteIdent(metadataStatusColumn)}` : ""}
                 ${metadataErrorColumn ? `, mt.${quoteIdent(metadataErrorColumn)}` : ""}
+                ${metadataColumnsColumn ? `, mt.${quoteIdent(metadataColumnsColumn)}` : ""}
               order by ${metadataCreatedColumn ? `mt.${quoteIdent(metadataCreatedColumn)} desc` : `mt.${quoteIdent(metadataNameColumn)} asc`}
               limit ${limitParam}::int offset ${offsetParam}::int
             `,
@@ -376,7 +389,7 @@ export async function POST(request: Request) {
   const admin = await getCurrentAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { metadataName, text, sheet } = await request.json().catch(() => ({}));
+  const { metadataName, text, sheet, columns, fields } = await request.json().catch(() => ({}));
   if (!metadataName || !text) {
     return NextResponse.json({ error: "Metadata berkas tujuan dan isi teks wajib diisi." }, { status: 400 });
   }
@@ -386,7 +399,9 @@ export async function POST(request: Request) {
       eventType: "create_chunk",
       metadataName,
       text,
-      sheet: sheet || "Manual_Added"
+      sheet: sheet || "Manual_Added",
+      columns: columns || undefined,
+      fields: fields || undefined
     });
 
     await writeAuditLog({
@@ -413,7 +428,7 @@ export async function PUT(request: Request) {
   const admin = await getCurrentAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const { id, text, metadataName, sheet, row } = await request.json().catch(() => ({}));
+  const { id, text, metadataName, sheet, row, columns, fields } = await request.json().catch(() => ({}));
   if (!id || !text) {
     return NextResponse.json({ error: "ID chunk dan konten teks baru wajib dikirimkan." }, { status: 400 });
   }
@@ -425,7 +440,9 @@ export async function PUT(request: Request) {
       text,
       metadataName,
       sheet: sheet || "Manual_Edited",
-      row: row ?? null
+      row: row ?? null,
+      columns: columns || undefined,
+      fields: fields || undefined
     });
 
     await writeAuditLog({
