@@ -58,6 +58,45 @@ export function LoadingNotice({ text }: { text: string }) {
   );
 }
 
+// Skeleton berbentuk baris tabel/daftar — dipakai saat data SEDANG dimuat,
+// menggantikan area konten (bukan cuma spinner terpisah), supaya layout
+// tidak "lompat" saat data selesai dimuat dan terasa lebih responsif.
+export function TableSkeleton({
+  rows = 5,
+  columns = 3
+}: {
+  rows?: number;
+  columns?: number;
+}) {
+  return (
+    <div className="divide-y divide-slate-100" aria-hidden="true">
+      {Array.from({ length: rows }).map((_, rowIndex) => (
+        <div key={rowIndex} className="p-5 flex items-center gap-4 animate-pulse">
+          {Array.from({ length: columns }).map((_, colIndex) => (
+            <div
+              key={colIndex}
+              className="h-3.5 rounded bg-slate-200"
+              style={{
+                width: colIndex === 0 ? "40%" : `${Math.max(15, 30 - colIndex * 5)}%`
+              }}
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Skeleton untuk kartu statistik (angka besar + label) di Dashboard
+export function StatCardSkeleton() {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm animate-pulse" aria-hidden="true">
+      <div className="h-3 w-24 bg-slate-200 rounded mb-3" />
+      <div className="h-7 w-16 bg-slate-200 rounded" />
+    </div>
+  );
+}
+
 export function DismissibleAlert({
   kind,
   text,

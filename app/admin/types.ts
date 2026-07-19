@@ -1,4 +1,4 @@
-export type Tab = "dashboard" | "rag" | "chat";
+export type Tab = "dashboard" | "rag" | "chat" | "system";
 
 export type Range =
   | "today"
@@ -140,3 +140,27 @@ export const reportRangeOptions: Array<{ value: Range; label: string }> = [
   { value: "all", label: "Selamanya" },
   { value: "custom", label: "Custom" },
 ];
+
+export type AuditLogRow = {
+  id?: string;
+  action: string;
+  detail?: Record<string, unknown> | null;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  created_at?: string | null;
+  admin_name?: string | null;
+  admin_email?: string | null;
+};
+
+export type WebhookStatus = {
+  configured: boolean;
+  reachable: boolean;
+  httpStatus?: number;
+  error?: string;
+};
+
+export type N8nStatusResponse = {
+  checkedAt: string;
+  upload: WebhookStatus;
+  crud: WebhookStatus;
+};

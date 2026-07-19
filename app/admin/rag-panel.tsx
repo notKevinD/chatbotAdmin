@@ -17,6 +17,7 @@ import {
   ExcelPreviewDialog,
   PaginationControls,
   StatusBadge,
+  TableSkeleton,
 } from "@/app/admin/shared";
 
 export function RagPanel({
@@ -84,6 +85,7 @@ export function RagPanel({
   const [dynamicFields, setDynamicFields] = useState<Record<string, string>>({});
   const [editColumns, setEditColumns] = useState<string[]>(["Pertanyaan", "Jawaban"]);
   const [editFields, setEditFields] = useState<Record<string, string>>({});
+  const originalEditFieldsRef = useRef<Record<string, string>>({});
   const [submittingModal, setSubmittingModal] = useState(false);
 
   const DEFAULT_LEGACY_COLUMNS = ["Pertanyaan", "Jawaban"];
@@ -161,6 +163,40 @@ export function RagPanel({
       emptyFields[col] = "";
     });
     setDynamicFields(emptyFields);
+  }
+
+  // Cek apakah ada isian yang belum disimpan sebelum modal ditutup, supaya
+  // user tidak kehilangan data yang sudah diketik gara-gara tidak sengaja
+  // klik "Batal" atau tombol ×.
+  function hasUnsavedAddInput() {
+    return Object.values(dynamicFields).some((value) => value?.trim());
+  }
+
+  function closeAddModal() {
+    if (hasUnsavedAddInput()) {
+      const confirmed = window.confirm(
+        "Ada isian yang belum disimpan. Yakin mau menutup form ini? Perubahan akan hilang.",
+      );
+      if (!confirmed) return;
+    }
+    setIsAddModalOpen(false);
+  }
+
+  function hasUnsavedEditInput() {
+    if (!selectedChunkForEdit) return false;
+    return editColumns.some(
+      (col) => (editFields[col] || "").trim() !== (originalEditFieldsRef.current[col] || "").trim(),
+    );
+  }
+
+  function closeEditModal() {
+    if (hasUnsavedEditInput()) {
+      const confirmed = window.confirm(
+        "Ada perubahan yang belum disimpan. Yakin mau menutup form ini? Perubahan akan hilang.",
+      );
+      if (!confirmed) return;
+    }
+    setIsEditModalOpen(false);
   }
 
   function clearSelectedFile() {
@@ -717,7 +753,13 @@ export function RagPanel({
                   </td>
                 </tr>
               ))}
-              {!metadataRows.length ? (
+              {loading && !metadataRows.length ? (
+                <tr>
+                  <td colSpan={5} className="p-0">
+                    <TableSkeleton rows={4} columns={4} />
+                  </td>
+                </tr>
+              ) : !metadataRows.length ? (
                 <tr>
                   <td colSpan={5} className="p-8 text-center text-slate-400">
                     Belum ada file data chatbot.
@@ -827,6 +869,7 @@ export function RagPanel({
                           });
                           setEditColumns(cols);
                           setEditFields(values);
+                          originalEditFieldsRef.current = { ...values };
                         } else {
                           const textContent = String(
                             (row.raw as any)?.text || row.preview || "",
@@ -848,6 +891,7 @@ export function RagPanel({
                               });
                               setEditColumns(knownColumns);
                               setEditFields(values);
+                              originalEditFieldsRef.current = { ...values };
                               setSelectedChunkForEdit(row);
                               setIsEditModalOpen(true);
                               return;
@@ -861,10 +905,12 @@ export function RagPanel({
                           );
                           const aMatch = textContent.match(/\nJawaban:\s*([\s\S]*)/);
                           setEditColumns(["Pertanyaan", "Jawaban"]);
-                          setEditFields({
+                          const tier3Values = {
                             Pertanyaan: qMatch ? qMatch[1].trim() : textContent.trim(),
                             Jawaban: aMatch ? aMatch[1].trim() : "",
-                          });
+                          };
+                          setEditFields(tier3Values);
+                          originalEditFieldsRef.current = { ...tier3Values };
                         }
 
                         setIsEditModalOpen(true);
@@ -924,7 +970,7 @@ export function RagPanel({
               </div>
               <button
                 className="text-slate-400 hover:text-slate-600 font-bold text-2xl p-1 leading-none"
-                onClick={() => setIsAddModalOpen(false)}
+                onClick={() => closeAddModal()}
               >
                 ×
               </button>
@@ -1002,7 +1048,7 @@ export function RagPanel({
                 <button
                   type="button"
                   className="px-4 py-2 border border-slate-200 rounded-lg text-slate-700 text-sm font-semibold hover:bg-slate-50"
-                  onClick={() => setIsAddModalOpen(false)}
+                  onClick={() => closeAddModal()}
                 >
                   Batal
                 </button>
@@ -1040,7 +1086,7 @@ export function RagPanel({
               </div>
               <button
                 className="text-slate-400 hover:text-slate-600 font-bold text-2xl p-1 leading-none"
-                onClick={() => setIsEditModalOpen(false)}
+                onClick={() => closeEditModal()}
               >
                 ×
               </button>
@@ -1088,7 +1134,7 @@ export function RagPanel({
                 <button
                   type="button"
                   className="px-4 py-2 border border-slate-200 rounded-lg text-slate-700 text-sm font-semibold hover:bg-slate-50"
-                  onClick={() => setIsEditModalOpen(false)}
+                  onClick={() => closeEditModal()}
                 >
                   Batal
                 </button>

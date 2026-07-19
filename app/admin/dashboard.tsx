@@ -15,10 +15,13 @@ import {
   LoadingNotice,
   PaginationControls,
   QuestionChart,
-  Stat
+  Stat,
+  StatCardSkeleton,
+  TableSkeleton
 } from "@/app/admin/shared";
 
 export function Dashboard({ overview, range }: { overview: Overview | null; range: Range }) {
+  const isInitialLoading = overview === null;
   const stats = overview?.stats || { users: 0, chats: 0, unanswered: 0 };
   const unansweredItems = overview?.unansweredSamples || [];
   const [unansweredPage, setUnansweredPage] = useState(1);
@@ -63,15 +66,25 @@ export function Dashboard({ overview, range }: { overview: Overview | null; rang
     <div className="flex flex-col gap-6">
       {/* CARD STATS SECTION */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-          <Stat label={`Pengguna ${rangeLabel[range]}`} value={stats.users} />
-        </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-          <Stat label={`Pertanyaan ${rangeLabel[range]}`} value={stats.chats} />
-        </div>
-        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm border-l-4 border-l-rose-500">
-          <Stat label="Jawaban Bermasalah" value={stats.unanswered} />
-        </div>
+        {isInitialLoading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : (
+          <>
+            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+              <Stat label={`Pengguna ${rangeLabel[range]}`} value={stats.users} />
+            </div>
+            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+              <Stat label={`Pertanyaan ${rangeLabel[range]}`} value={stats.chats} />
+            </div>
+            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm border-l-4 border-l-rose-500">
+              <Stat label="Jawaban Bermasalah" value={stats.unanswered} />
+            </div>
+          </>
+        )}
       </section>
 
       {/* GRAFIK PERTANYAAN */}
@@ -86,7 +99,9 @@ export function Dashboard({ overview, range }: { overview: Overview | null; rang
           <p className="text-xs text-slate-500">Daftar pertanyaan yang memicu respon fallback pada bot AI.</p>
         </div>
         
-        {unansweredItems.length ? (
+        {isInitialLoading ? (
+          <TableSkeleton rows={5} columns={2} />
+        ) : unansweredItems.length ? (
           <>
             <ul className="divide-y divide-slate-100">
               {visibleUnanswered.map((item, index) => (
