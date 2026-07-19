@@ -88,6 +88,37 @@ export function RagPanel({
 
   const DEFAULT_LEGACY_COLUMNS = ["Pertanyaan", "Jawaban"];
 
+  // Ekstrak field dari teks chunk menggunakan daftar label yang SUDAH PASTI
+  // valid (dari metadata_table.columns), bukan tebakan generik — jadi aman
+  // dari salah potong walau isi jawabannya kebetulan ada tanda ":" di dalamnya.
+  function extractFieldsUsingKnownColumns(
+    text: string,
+    knownColumns: string[],
+  ): Record<string, string> {
+    if (!knownColumns.length) return {};
+    const escaped = knownColumns.map((col) =>
+      col.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    );
+    const pattern = new RegExp(
+      `(?:^|\\n)(${escaped.join("|")}):\\s*`,
+      "g",
+    );
+    const matches: Array<{ label: string; contentStart: number; matchStart: number }> = [];
+    let m: RegExpExecArray | null;
+    while ((m = pattern.exec(text)) !== null) {
+      matches.push({ label: m[1], contentStart: m.index + m[0].length, matchStart: m.index });
+    }
+    if (!matches.length) return {};
+
+    const result: Record<string, string> = {};
+    for (let i = 0; i < matches.length; i++) {
+      const end = i + 1 < matches.length ? matches[i + 1].matchStart : text.length;
+      result[matches[i].label] = text.slice(matches[i].contentStart, end).trim();
+    }
+    return result;
+  }
+
+
   function getSheetsForMetadata(metadataName: string): string[] {
     const row = metadataRows.find((r) => r.metadata_name === metadataName);
     if (!row?.columns) return [];
@@ -786,7 +817,7 @@ export function RagPanel({
                         const rawFields = rawMeta?.fields;
 
                         if (rawFields && typeof rawFields === "object" && !Array.isArray(rawFields)) {
-                          // Paling akurat: chunk ini sudah punya field terstruktur
+                          // Tier 1 - PALING AKURAT: chunk ini sudah punya field terstruktur
                           const cols = Array.isArray(rawMeta?.columns) && rawMeta.columns.length
                             ? rawMeta.columns
                             : Object.keys(rawFields);
@@ -797,11 +828,34 @@ export function RagPanel({
                           setEditColumns(cols);
                           setEditFields(values);
                         } else {
-                          // Fallback data lama: cari HANYA label "Pertanyaan:"/"Jawaban:" tetap
-                          // (bukan tebakan generik) — anti salah potong isi jawaban yang ada ":"-nya
                           const textContent = String(
                             (row.raw as any)?.text || row.preview || "",
                           );
+
+                          // Tier 2 - chunk lama TAPI filenya sudah punya daftar kolom
+                          // tersimpan di metadata_table -> ekstrak per-kolom pakai label
+                          // yang sudah pasti valid (bukan tebakan generik)
+                          const sheetName = rawMeta?.sheet || "";
+                          const hasStoredColumns = getSheetsForMetadata(row.metadata_name).length > 0;
+
+                          if (hasStoredColumns) {
+                            const knownColumns = getColumnsForSheet(row.metadata_name, sheetName);
+                            const extracted = extractFieldsUsingKnownColumns(textContent, knownColumns);
+                            if (Object.keys(extracted).length) {
+                              const values: Record<string, string> = {};
+                              knownColumns.forEach((col) => {
+                                values[col] = extracted[col] || "";
+                              });
+                              setEditColumns(knownColumns);
+                              setEditFields(values);
+                              setSelectedChunkForEdit(row);
+                              setIsEditModalOpen(true);
+                              return;
+                            }
+                          }
+
+                          // Tier 3 - fallback terakhir: cari HANYA label "Pertanyaan:"/"Jawaban:"
+                          // tetap (bukan tebakan generik) — anti salah potong isi jawaban
                           const qMatch = textContent.match(
                             /^Pertanyaan:\s*([\s\S]*?)(?=\nJawaban:|$)/,
                           );
@@ -856,10 +910,10 @@ export function RagPanel({
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
           <div
             aria-modal="true"
-            className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200"
+            className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-200"
             role="dialog"
           >
-            <div className="p-5 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+            <div className="p-5 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider text-indigo-600">
                   Basis Pengetahuan
@@ -876,23 +930,27 @@ export function RagPanel({
               </button>
             </div>
 
-            <form onSubmit={handleCreateManualChunk} className="p-6 space-y-4">
-              <div className="field flex flex-col gap-1">
-                <label className="text-xs font-semibold text-slate-700">
-                  Pilih Target Berkas (Metadata)
-                </label>
-                <select
-                  className="w-full border border-slate-300 bg-white text-slate-800 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500"
-                  value={targetMetadata}
-                  onChange={(e) => handleTargetMetadataChange(e.target.value)}
-                  required
-                >
-                  <option value="" disabled>
-                    -- Pilih Berkas Tujuan --
-                  </option>
-                  {metadataRows.map((row) => (
-                    <option key={row.metadata_name} value={row.metadata_name}>
-                      {row.metadata_name}
+            <form
+              onSubmit={handleCreateManualChunk}
+              className="flex flex-col flex-1 min-h-0"
+            >
+              <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+                <div className="field flex flex-col gap-1">
+                  <label className="text-xs font-semibold text-slate-700">
+                    Pilih Target Berkas (Metadata)
+                  </label>
+                  <select
+                    className="w-full border border-slate-300 bg-white text-slate-800 rounded-lg p-2 text-sm focus:ring-2 focus:ring-indigo-500"
+                    value={targetMetadata}
+                    onChange={(e) => handleTargetMetadataChange(e.target.value)}
+                    required
+                  >
+                    <option value="" disabled>
+                      -- Pilih Berkas Tujuan --
+                    </option>
+                    {metadataRows.map((row) => (
+                      <option key={row.metadata_name} value={row.metadata_name}>
+                        {row.metadata_name}
                     </option>
                   ))}
                 </select>
@@ -938,8 +996,9 @@ export function RagPanel({
                     />
                   </div>
                 ))}
+              </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <div className="flex justify-end gap-2 p-4 border-t border-slate-100 bg-white shrink-0">
                 <button
                   type="button"
                   className="px-4 py-2 border border-slate-200 rounded-lg text-slate-700 text-sm font-semibold hover:bg-slate-50"
@@ -967,10 +1026,10 @@ export function RagPanel({
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
           <div
             aria-modal="true"
-            className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200"
+            className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-200"
             role="dialog"
           >
-            <div className="p-5 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+            <div className="p-5 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
               <div>
                 <span className="text-xs font-bold uppercase tracking-wider text-amber-600">
                   Perbarui Data
@@ -987,40 +1046,45 @@ export function RagPanel({
               </button>
             </div>
 
-            <form onSubmit={handleUpdateManualChunk} className="p-6 space-y-4">
-              <div className="field flex flex-col gap-1">
-                <label className="text-xs font-medium text-slate-400">
-                  ID Chunk Terdaftar
-                </label>
-                <input
-                  type="text"
-                  className="w-full bg-slate-50 border border-slate-200 text-slate-400 rounded-lg p-2 text-xs font-mono"
-                  value={selectedChunkForEdit?.id || ""}
-                  disabled
-                />
-              </div>
-
-              {editColumns.map((col) => (
-                <div key={col} className="field flex flex-col gap-1">
-                  <label className="text-xs font-semibold text-slate-700">
-                    {col}
+            <form
+              onSubmit={handleUpdateManualChunk}
+              className="flex flex-col flex-1 min-h-0"
+            >
+              <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+                <div className="field flex flex-col gap-1">
+                  <label className="text-xs font-medium text-slate-400">
+                    ID Chunk Terdaftar
                   </label>
-                  <textarea
-                    rows={3}
-                    className="w-full border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-800"
-                    value={editFields[col] || ""}
-                    onChange={(e) =>
-                      setEditFields((prev) => ({
-                        ...prev,
-                        [col]: e.target.value,
-                      }))
-                    }
-                    required
+                  <input
+                    type="text"
+                    className="w-full bg-slate-50 border border-slate-200 text-slate-400 rounded-lg p-2 text-xs font-mono"
+                    value={selectedChunkForEdit?.id || ""}
+                    disabled
                   />
                 </div>
-              ))}
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                {editColumns.map((col) => (
+                  <div key={col} className="field flex flex-col gap-1">
+                    <label className="text-xs font-semibold text-slate-700">
+                      {col}
+                    </label>
+                    <textarea
+                      rows={3}
+                      className="w-full border border-slate-300 rounded-lg p-2 text-sm bg-white text-slate-800"
+                      value={editFields[col] || ""}
+                      onChange={(e) =>
+                        setEditFields((prev) => ({
+                          ...prev,
+                          [col]: e.target.value,
+                        }))
+                      }
+                      required
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-end gap-2 p-4 border-t border-slate-100 bg-white shrink-0">
                 <button
                   type="button"
                   className="px-4 py-2 border border-slate-200 rounded-lg text-slate-700 text-sm font-semibold hover:bg-slate-50"
