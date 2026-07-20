@@ -182,6 +182,17 @@ export async function isAuthenticated() {
   return Boolean(await getCurrentAdmin());
 }
 
+// Dipakai backend saja (mis. endpoint /api/admin/sessions) untuk menandai
+// baris sesi mana yang sedang dipakai browser ini, TANPA pernah mengirim
+// token/hash asli ke client — cukup dibandingkan di server lalu balas
+// boolean `isCurrent` per baris.
+export async function getCurrentSessionTokenHash() {
+  const cookieStore = cookies();
+  const token = cookieStore.get(COOKIE_NAME)?.value;
+  if (!token) return null;
+  return hashSessionToken(token);
+}
+
 export async function clearAuthCookie() {
   const cookieStore = cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value;

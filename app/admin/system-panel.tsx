@@ -11,6 +11,7 @@ import {
 import { fetchJson, formatIndonesianDateTime } from "@/app/admin/utils";
 import { LoadingNotice, PaginationControls, TableSkeleton } from "@/app/admin/shared";
 import { AdminManagementSection } from "@/app/admin/admin-management";
+import { ActiveSessionsSection } from "@/app/admin/active-sessions";
 
 function WebhookStatusCard({ label, status }: { label: string; status: WebhookStatus | null }) {
   const badgeColor = !status
@@ -230,6 +231,9 @@ export function SystemPanel() {
 
       {/* KELOLA AKUN ADMIN */}
       <AdminManagementSection />
+
+      {/* SESI LOGIN AKTIF */}
+      <ActiveSessionsSection />
 
       {/* LOG AKTIVITAS ADMIN */}
       <section className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">

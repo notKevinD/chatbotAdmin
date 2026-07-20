@@ -112,7 +112,16 @@ export function getContextItems(value: unknown) {
 
 export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
-  
+
+  // Session habis / belum login → paksa redirect ke /login, jangan cuma
+  // tampilkan teks "Unauthorized" di panel.
+  if (response.status === 401) {
+    if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+      window.location.href = "/login";
+    }
+    throw new Error("Sesi login sudah berakhir. Mengalihkan ke halaman login...");
+  }
+
   // Menangani penanganan error stream jika response kosong/bukan JSON valid
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {

@@ -117,6 +117,30 @@ export default function AdminApp() {
     return () => window.clearTimeout(timeout);
   }, [error, message]);
 
+  // Polling status sesi tiap 60 detik. Ini menutup celah kasus user diam
+  // saja di layar (tidak klik apa pun) saat sesi habis — tanpa ini, redirect
+  // baru terjadi saat user melakukan aksi berikutnya (lihat fetchJson di
+  // utils.ts, yang redirect kalau dapat 401 dari request manapun).
+  useEffect(() => {
+    const SESSION_CHECK_INTERVAL_MS = 60 * 1000;
+
+    async function checkSession() {
+      try {
+        const response = await fetch("/api/auth/session");
+        if (response.status === 401) {
+          router.push("/login");
+          router.refresh();
+        }
+      } catch {
+        // Gagal cek (mis. jaringan putus sesaat) — jangan redirect paksa,
+        // biar tidak salah tendang user karena masalah koneksi sementara.
+      }
+    }
+
+    const intervalId = window.setInterval(checkSession, SESSION_CHECK_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [router]);
+
   async function loadOverview() {
     setError("");
     setLoading(true);

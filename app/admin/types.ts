@@ -193,3 +193,16 @@ export type GlobalSearchResult = {
   metadata_name: string;
   preview: string;
 };
+
+export type SessionRow = {
+  id: string;
+  adminId?: string | null;
+  adminName?: string | null;
+  adminEmail?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  createdAt?: string | null;
+  lastUsedAt?: string | null;
+  expiresAt?: string | null;
+  isCurrent?: boolean;
+};
