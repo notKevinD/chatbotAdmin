@@ -1,12 +1,13 @@
 "use client";
 
-import { ChangeEvent, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   ConfirmDialogState,
   DocumentRow,
   DuplicateCheckResponse,
   ExcelPreview,
+  GlobalSearchResult,
   MetadataRow,
   PaginationInfo,
 } from "@/app/admin/types";
@@ -87,6 +88,88 @@ export function RagPanel({
   const [editFields, setEditFields] = useState<Record<string, string>>({});
   const originalEditFieldsRef = useRef<Record<string, string>>({});
   const [submittingModal, setSubmittingModal] = useState(false);
+
+  // Pencarian lintas semua file (bukan cuma file yang lagi dibuka)
+  const [globalSearchQuery, setGlobalSearchQuery] = useState("");
+  const [globalSearchResults, setGlobalSearchResults] = useState<GlobalSearchResult[]>([]);
+  const [globalSearchLoading, setGlobalSearchLoading] = useState(false);
+  const [globalSearchError, setGlobalSearchError] = useState("");
+  const [hasSearchedGlobally, setHasSearchedGlobally] = useState(false);
+
+  async function runGlobalSearch() {
+    if (!globalSearchQuery.trim()) return;
+    setGlobalSearchLoading(true);
+    setGlobalSearchError("");
+    setHasSearchedGlobally(true);
+    try {
+      const params = new URLSearchParams({ globalSearch: globalSearchQuery.trim(), limit: "20" });
+      const data = await fetchJson<{ rows: GlobalSearchResult[] }>(
+        `/api/admin/documents?${params.toString()}`,
+      );
+      setGlobalSearchResults(data.rows || []);
+    } catch (err) {
+      setGlobalSearchError(
+        err instanceof Error ? err.message : "Gagal mencari di semua file.",
+      );
+    } finally {
+      setGlobalSearchLoading(false);
+    }
+  }
+
+  // Pilih banyak chunk sekaligus untuk dihapus bersamaan
+  const [selectedChunkIds, setSelectedChunkIds] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  function toggleChunkSelection(id: string) {
+    setSelectedChunkIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAllChunks() {
+    setSelectedChunkIds((prev) => {
+      if (prev.size === documents.length) return new Set();
+      return new Set(documents.map((d) => d.id));
+    });
+  }
+
+  async function handleBulkDeleteChunks() {
+    if (!selectedChunkIds.size) return;
+    const confirmed = window.confirm(
+      `Hapus ${selectedChunkIds.size} chunk terpilih? Tindakan ini tidak bisa dibatalkan.`,
+    );
+    if (!confirmed) return;
+
+    setBulkDeleting(true);
+    setError("");
+    setMessage("");
+    try {
+      const result = await fetchJson<{ deleted: number }>("/api/admin/documents", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selectedChunkIds) }),
+      });
+      setMessage(`${result.deleted} chunk berhasil dihapus.`);
+      setSelectedChunkIds(new Set());
+      await reload(metadataPagination?.page || 1);
+      if (selectedMetadata) {
+        await loadDetails(selectedMetadata, documentPagination?.page || 1);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal menghapus chunk terpilih.");
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
+  useEffect(() => {
+    setSelectedChunkIds(new Set());
+  }, [selectedMetadata, documents]);
+
+
 
   const DEFAULT_LEGACY_COLUMNS = ["Pertanyaan", "Jawaban"];
 
@@ -652,6 +735,65 @@ export function RagPanel({
         </section>
       ) : null}
 
+      {/* SECTION 2.5: CARI DI SEMUA FILE SEKALIGUS */}
+      <section className="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
+        <h2 className="text-base font-bold text-slate-800 mb-1">Cari di Semua File</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          Cari isi chunk tanpa perlu buka file satu-satu dulu.
+        </p>
+        <div className="flex gap-2">
+          <input
+            className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white text-slate-800 placeholder-slate-400 focus:outline-indigo-600"
+            placeholder="Contoh: biaya kuliah, beasiswa, jadwal..."
+            value={globalSearchQuery}
+            onChange={(e) => setGlobalSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") runGlobalSearch();
+            }}
+          />
+          <button
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-sm font-semibold shrink-0"
+            onClick={runGlobalSearch}
+            disabled={globalSearchLoading}
+            type="button"
+          >
+            {globalSearchLoading ? "Mencari..." : "Cari"}
+          </button>
+        </div>
+
+        {globalSearchError && (
+          <div className="mt-3 p-3 bg-rose-50 border border-rose-200 text-rose-600 rounded-lg text-sm">
+            {globalSearchError}
+          </div>
+        )}
+
+        {hasSearchedGlobally && !globalSearchLoading && (
+          <div className="mt-3">
+            {globalSearchResults.length ? (
+              <ul className="divide-y divide-slate-100 border border-slate-100 rounded-lg overflow-hidden">
+                {globalSearchResults.map((result) => (
+                  <li key={result.id}>
+                    <button
+                      className="w-full text-left p-3 hover:bg-slate-50 flex flex-col gap-1"
+                      onClick={() => {
+                        loadDetails(result.metadata_name, 1);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      type="button"
+                    >
+                      <span className="text-xs font-bold text-indigo-600">{result.metadata_name}</span>
+                      <span className="text-xs text-slate-500 line-clamp-2">{result.preview}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-slate-400 p-3">Tidak ada hasil untuk pencarian ini.</p>
+            )}
+          </div>
+        )}
+      </section>
+
       {/* SECTION 3: DAFTAR BERKAS METADATA KNOWLEDGE */}
       <section className="table-wrap bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
         <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -788,7 +930,17 @@ export function RagPanel({
               Tinjau segmen fragmen chunk vector yang diindeks oleh mesin AI.
             </p>
           </div>
-          <div className="table-tools flex gap-2 items-center">
+          <div className="table-tools flex gap-2 items-center flex-wrap">
+            {selectedChunkIds.size > 0 && (
+              <button
+                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg"
+                onClick={handleBulkDeleteChunks}
+                disabled={bulkDeleting}
+                type="button"
+              >
+                {bulkDeleting ? "Menghapus..." : `Hapus ${selectedChunkIds.size} Terpilih`}
+              </button>
+            )}
             <input
               className="border border-slate-300 rounded-lg px-3 py-1.5 text-xs bg-white text-slate-800 placeholder-slate-400 focus:outline-indigo-600 disabled:opacity-50"
               disabled={!selectedMetadata}
@@ -826,6 +978,14 @@ export function RagPanel({
           <table className="w-full text-left border-collapse text-sm">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-700 font-semibold">
+                <th className="p-3" style={{ width: "36px" }}>
+                  <input
+                    type="checkbox"
+                    checked={documents.length > 0 && selectedChunkIds.size === documents.length}
+                    onChange={toggleSelectAllChunks}
+                    aria-label="Pilih semua chunk di halaman ini"
+                  />
+                </th>
                 <th className="p-3">Isi Data Segmen</th>
                 <th className="p-3 text-right" style={{ width: "200px" }}>
                   Aksi
@@ -838,6 +998,14 @@ export function RagPanel({
                   key={`${row.id}-${row.metadata_name}`}
                   className="hover:bg-slate-50/40 transition-all"
                 >
+                  <td className="p-3 align-top">
+                    <input
+                      type="checkbox"
+                      checked={selectedChunkIds.has(row.id)}
+                      onChange={() => toggleChunkSelection(row.id)}
+                      aria-label={`Pilih chunk ${row.id}`}
+                    />
+                  </td>
                   <td
                     className="p-3 leading-relaxed break-words"
                     style={{ whiteSpace: "normal" }}
@@ -929,7 +1097,7 @@ export function RagPanel({
               ))}
               {!documents.length ? (
                 <tr>
-                  <td colSpan={2} className="p-8 text-center text-slate-400">
+                  <td colSpan={3} className="p-8 text-center text-slate-400">
                     {selectedMetadata
                       ? "Belum ada isi data untuk file ini."
                       : "Klik Detail pada file data untuk melihat isinya."}

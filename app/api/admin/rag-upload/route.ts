@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentAdmin, isAuthenticated } from "@/lib/auth";
+import { checkRateLimit, getIpAddress } from "@/lib/rate-limit";
 import { writeAuditLog } from "@/lib/audit";
 import { formatDbError, getColumns, pickColumn, quoteIdent, withClient } from "@/lib/db";
 
@@ -170,6 +171,14 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const admin = await getCurrentAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const rateLimit = checkRateLimit(`rag-upload:${admin.id}:${getIpAddress(request)}`, 10, 10 * 60 * 1000);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: `Terlalu banyak upload dalam waktu singkat. Coba lagi dalam ${rateLimit.retryAfterSeconds} detik.` },
+      { status: 429 }
+    );
+  }
 
   const webhook = process.env.N8N_RAG_UPLOAD_WEBHOOK;
   if (!webhook) {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentAdmin } from "@/lib/auth";
+import { checkRateLimit, getIpAddress } from "@/lib/rate-limit";
 import { writeAuditLog } from "@/lib/audit";
 import {
   formatDbError,
@@ -186,9 +187,66 @@ export async function GET(request: Request) {
   const selectedMetadata = url.searchParams.get("metadata");
   const fileToExport = url.searchParams.get("file");
   const search = (url.searchParams.get("q") || "").trim();
+  const globalSearch = (url.searchParams.get("globalSearch") || "").trim();
   const page = Math.max(Number(url.searchParams.get("page") || "1"), 1);
   const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || "10"), 1), 100);
   const offset = (page - 1) * limit;
+
+  // ------------------------------------------------------------
+  // MODE PENCARIAN LINTAS FILE: ?globalSearch=... — cari isi chunk di
+  // SEMUA file sekaligus, tidak perlu buka file satu-satu dulu.
+  // ------------------------------------------------------------
+  if (globalSearch) {
+    try {
+      const result = await withClient(async (client) => {
+        const info = await getColumns(client, "documents");
+        const idColumn = pickColumn(info.columns, ["id", "uuid", "document_id"]);
+        const metaColumn = pickColumn(info.columns, ["metadata"]);
+        const contentColumn = pickColumn(info.columns, ["content", "pageContent", "text", "document"]);
+
+        const metadataNameExpression =
+          metaColumn === "metadata"
+            ? `coalesce(d.metadata->>'metadata_name', d.metadata->>'metadataName', d.metadata->'source'->>'source', d.metadata->>'source', d.metadata->>'fileName', 'Tanpa metadata')`
+            : "'Tanpa metadata'";
+
+        const countRes = await client.query(
+          `
+            select count(*)::int as total
+            from ${info.table.sql} d
+            where ${contentColumn ? `d.${quoteIdent(contentColumn)}::text ilike $1::text` : "false"}
+          `,
+          [`%${globalSearch}%`]
+        );
+        const total = countRes.rows[0]?.total || 0;
+
+        const dataRes = await client.query(
+          `
+            select
+              ${idColumn ? `d.${quoteIdent(idColumn)}::text` : "row_number() over ()::text"} as id,
+              ${metadataNameExpression} as metadata_name,
+              ${contentColumn ? `left(d.${quoteIdent(contentColumn)}::text, 240)` : "''"} as preview
+            from ${info.table.sql} d
+            where ${contentColumn ? `d.${quoteIdent(contentColumn)}::text ilike $1::text` : "false"}
+            order by ${idColumn ? `d.${quoteIdent(idColumn)}` : "1"} asc
+            limit $2::int offset $3::int
+          `,
+          [`%${globalSearch}%`, limit, offset]
+        );
+
+        return {
+          rows: dataRes.rows,
+          pagination: { page, limit, total, totalPages: Math.max(Math.ceil(total / limit), 1) }
+        };
+      });
+
+      return NextResponse.json({ mode: "global-search", ...result });
+    } catch (error) {
+      return NextResponse.json(
+        { error: formatDbError(error, "Gagal mencari di semua file.") },
+        { status: 500 }
+      );
+    }
+  }
 
   try {
     const data = await withClient(async (client) => {
@@ -389,6 +447,14 @@ export async function POST(request: Request) {
   const admin = await getCurrentAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const rateLimit = checkRateLimit(`documents-write:${admin.id}:${getIpAddress(request)}`, 30, 5 * 60 * 1000);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: `Terlalu banyak permintaan. Coba lagi dalam ${rateLimit.retryAfterSeconds} detik.` },
+      { status: 429 }
+    );
+  }
+
   const { metadataName, text, sheet, columns, fields } = await request.json().catch(() => ({}));
   if (!metadataName || !text) {
     return NextResponse.json({ error: "Metadata berkas tujuan dan isi teks wajib diisi." }, { status: 400 });
@@ -427,6 +493,14 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
   const admin = await getCurrentAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const rateLimit = checkRateLimit(`documents-write:${admin.id}:${getIpAddress(request)}`, 30, 5 * 60 * 1000);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: `Terlalu banyak permintaan. Coba lagi dalam ${rateLimit.retryAfterSeconds} detik.` },
+      { status: 429 }
+    );
+  }
 
   const { id, text, metadataName, sheet, row, columns, fields } = await request.json().catch(() => ({}));
   if (!id || !text) {
@@ -478,11 +552,61 @@ export async function DELETE(request: Request) {
   const admin = await getCurrentAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const rateLimit = checkRateLimit(`documents-write:${admin.id}:${getIpAddress(request)}`, 30, 5 * 60 * 1000);
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: `Terlalu banyak permintaan. Coba lagi dalam ${rateLimit.retryAfterSeconds} detik.` },
+      { status: 429 }
+    );
+  }
+
   const url = new URL(request.url);
   const idFromQuery = url.searchParams.get("id") || "";
   const metadataNameFromQuery = url.searchParams.get("metadataName") || "";
 
   const bodyJson = await request.json().catch(() => ({}));
+
+  // Dukungan BULK DELETE: kirim { ids: string[] } di body untuk hapus
+  // banyak chunk sekaligus (dipakai fitur pilih banyak di rag-panel.tsx)
+  if (Array.isArray(bodyJson?.ids) && bodyJson.ids.length) {
+    try {
+      const deletedCount = await withClient(async (client) => {
+        const documentInfo = await getColumns(client, "documents");
+        const idColumn = pickColumn(documentInfo.columns, ["id", "uuid", "document_id"]);
+        if (!idColumn) throw new Error("Kolom id tidak ditemukan di tabel documents.");
+
+        const ids = (bodyJson.ids as unknown[]).map((v) => String(v));
+        const result = await client.query(
+          `delete from ${documentInfo.table.sql} where ${quoteIdent(idColumn)}::text = ANY($1::text[])`,
+          [ids]
+        );
+
+        try {
+          await client.query("ANALYZE documents");
+        } catch (analyzeError) {
+          console.error("Peringatan: ANALYZE documents gagal setelah bulk delete_chunk (data tetap terhapus):", analyzeError);
+        }
+
+        return result.rowCount || 0;
+      });
+
+      await writeAuditLog({
+        request,
+        userId: admin.id,
+        action: "bulk_delete_rag_chunk",
+        detail: { count: deletedCount, ids: bodyJson.ids }
+      });
+
+      return NextResponse.json({ ok: true, deleted: deletedCount });
+    } catch (error) {
+      console.error("Gagal bulk hapus chunk langsung di DB:", error);
+      return NextResponse.json(
+        { error: formatDbError(error, "Gagal menghapus chunk terpilih.") },
+        { status: 500 }
+      );
+    }
+  }
+
   const metadataNameFromBody = bodyJson?.metadataName || "";
   const idFromBody = bodyJson?.id || "";
 

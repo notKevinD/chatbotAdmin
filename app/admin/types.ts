@@ -164,3 +164,32 @@ export type N8nStatusResponse = {
   upload: WebhookStatus;
   crud: WebhookStatus;
 };
+
+export type AdminUserRow = {
+  id: string;
+  email: string;
+  name?: string | null;
+  role?: string | null;
+  is_active: boolean;
+  created_at?: string;
+};
+
+export type DbStatsResponse = {
+  tables: Array<{
+    table_name: string;
+    row_count: number;
+    last_analyze: string | null;
+    last_autoanalyze: string | null;
+    analyze_count: number;
+    autoanalyze_count: number;
+    total_size: string;
+  }>;
+  indexes: Array<{ index_name: string; table_name: string; index_size: string }>;
+  databaseSize: string | null;
+};
+
+export type GlobalSearchResult = {
+  id: string;
+  metadata_name: string;
+  preview: string;
+};

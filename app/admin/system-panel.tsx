@@ -3,12 +3,14 @@
 import { useEffect, useState } from "react";
 import {
   AuditLogRow,
+  DbStatsResponse,
   N8nStatusResponse,
   PaginationInfo,
   WebhookStatus
 } from "@/app/admin/types";
 import { fetchJson, formatIndonesianDateTime } from "@/app/admin/utils";
 import { LoadingNotice, PaginationControls, TableSkeleton } from "@/app/admin/shared";
+import { AdminManagementSection } from "@/app/admin/admin-management";
 
 function WebhookStatusCard({ label, status }: { label: string; status: WebhookStatus | null }) {
   const badgeColor = !status
@@ -66,6 +68,23 @@ export function SystemPanel() {
   const [actionFilter, setActionFilter] = useState("");
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
 
+  const [dbStats, setDbStats] = useState<DbStatsResponse | null>(null);
+  const [dbStatsError, setDbStatsError] = useState("");
+  const [dbStatsLoading, setDbStatsLoading] = useState(false);
+
+  async function loadDbStats() {
+    setDbStatsLoading(true);
+    setDbStatsError("");
+    try {
+      const data = await fetchJson<DbStatsResponse>("/api/admin/db-stats");
+      setDbStats(data);
+    } catch (err) {
+      setDbStatsError(err instanceof Error ? err.message : "Gagal memuat statistik database.");
+    } finally {
+      setDbStatsLoading(false);
+    }
+  }
+
   async function checkN8nStatus() {
     setCheckingN8n(true);
     setN8nError("");
@@ -100,6 +119,7 @@ export function SystemPanel() {
   useEffect(() => {
     checkN8nStatus();
     loadLogs(1);
+    loadDbStats();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -141,6 +161,75 @@ export function SystemPanel() {
           </p>
         )}
       </section>
+
+      {/* STATISTIK DATABASE / PGVECTOR */}
+      <section className="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-base font-bold text-slate-800">Statistik Database</h2>
+            <p className="text-xs text-slate-500">
+              Ukuran tabel, jumlah baris, dan kapan terakhir ANALYZE dijalankan.
+            </p>
+          </div>
+          <button
+            className="px-3 py-2 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white rounded-lg text-xs font-semibold"
+            onClick={loadDbStats}
+            disabled={dbStatsLoading}
+            type="button"
+          >
+            {dbStatsLoading ? "Memuat..." : "Refresh"}
+          </button>
+        </div>
+
+        {dbStatsError && (
+          <div className="mb-3 p-3 bg-rose-50 border border-rose-200 text-rose-600 rounded-lg text-sm">
+            {dbStatsError}
+          </div>
+        )}
+
+        {dbStatsLoading && !dbStats ? (
+          <TableSkeleton rows={4} columns={4} />
+        ) : dbStats ? (
+          <div className="space-y-4">
+            {dbStats.databaseSize && (
+              <p className="text-xs text-slate-500">
+                Total ukuran database: <span className="font-bold text-slate-700">{dbStats.databaseSize}</span>
+              </p>
+            )}
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-slate-400 border-b border-slate-100">
+                    <th className="pb-2 pr-4 font-semibold">Tabel</th>
+                    <th className="pb-2 pr-4 font-semibold">Jumlah Baris</th>
+                    <th className="pb-2 pr-4 font-semibold">Ukuran</th>
+                    <th className="pb-2 pr-4 font-semibold">Terakhir ANALYZE</th>
+                    <th className="pb-2 font-semibold">Jumlah ANALYZE</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {dbStats.tables.map((t) => (
+                    <tr key={t.table_name}>
+                      <td className="py-2 pr-4 font-mono text-slate-700">{t.table_name}</td>
+                      <td className="py-2 pr-4 text-slate-600">{t.row_count.toLocaleString("id-ID")}</td>
+                      <td className="py-2 pr-4 text-slate-600">{t.total_size}</td>
+                      <td className="py-2 pr-4 text-slate-500">
+                        {t.last_analyze ? formatIndonesianDateTime(t.last_analyze) : "Belum pernah"}
+                      </td>
+                      <td className="py-2 text-slate-500">{t.analyze_count}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <LoadingNotice text="Memuat statistik database..." />
+        )}
+      </section>
+
+      {/* KELOLA AKUN ADMIN */}
+      <AdminManagementSection />
 
       {/* LOG AKTIVITAS ADMIN */}
       <section className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
