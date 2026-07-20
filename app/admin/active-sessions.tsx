@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { SessionRow } from "@/app/admin/types";
+import { CurrentAdminInfo, SessionRow } from "@/app/admin/types";
 import { fetchJson, formatIndonesianDateTime } from "@/app/admin/utils";
 import { TableSkeleton } from "@/app/admin/shared";
 
@@ -11,6 +11,14 @@ export function ActiveSessionsSection() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [currentAdmin, setCurrentAdmin] = useState<CurrentAdminInfo | null>(null);
+  const isSuperAdmin = currentAdmin?.role === "super_admin";
+
+  useEffect(() => {
+    fetchJson<{ admin: CurrentAdminInfo }>("/api/auth/session")
+      .then((data) => setCurrentAdmin(data.admin))
+      .catch(() => undefined);
+  }, []);
 
   async function loadSessions() {
     setLoading(true);
@@ -68,7 +76,9 @@ export function ActiveSessionsSection() {
         <div>
           <h2 className="text-base font-bold text-slate-800">Sesi Login Aktif</h2>
           <p className="text-xs text-slate-500">
-            Semua sesi admin yang sedang aktif (belum kedaluwarsa). Bisa dipaksa logout per sesi.
+            {isSuperAdmin
+              ? "Semua sesi admin yang sedang aktif (belum kedaluwarsa). Bisa dipaksa logout per sesi."
+              : "Sesi login kamu sendiri yang sedang aktif (belum kedaluwarsa)."}
           </p>
         </div>
         <button

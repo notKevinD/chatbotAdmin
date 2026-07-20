@@ -1,10 +1,20 @@
 import { NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/auth";
+import { getCurrentAdmin } from "@/lib/auth";
 
-// Endpoint ringan untuk polling status sesi dari client (AdminApp).
-// Sengaja tidak pakai getCurrentAdmin() penuh di response supaya payloadnya
-// kecil — cuma untuk tahu "masih login atau tidak", dipanggil berkala.
+// Dipakai untuk dua hal:
+// 1. Polling berkala dari AdminApp (deteksi sesi habis → auto redirect).
+// 2. Sumber info role untuk frontend (super_admin vs admin biasa), supaya
+//    UI bisa sembunyikan tombol aksi sensitif. Ini HANYA untuk kenyamanan
+//    tampilan — proteksi sesungguhnya tetap dilakukan di tiap API route
+//    lewat requireSuperAdmin(), bukan mengandalkan frontend.
 export async function GET() {
-  const authenticated = await isAuthenticated();
-  return NextResponse.json({ authenticated }, { status: authenticated ? 200 : 401 });
+  const admin = await getCurrentAdmin();
+  if (!admin) {
+    return NextResponse.json({ authenticated: false }, { status: 401 });
+  }
+
+  return NextResponse.json({
+    authenticated: true,
+    admin: { id: admin.id, email: admin.email, name: admin.name, role: admin.role }
+  });
 }

@@ -6,12 +6,22 @@ const COOKIE_NAME = "chatbot_admin_session";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 12;
 const SESSION_MAX_AGE_MS = SESSION_MAX_AGE_SECONDS * 1000;
 
+// Satu-satunya nilai role yang dianggap "super admin". Role lain (termasuk
+// kosong/null) dianggap admin biasa. Role disimpan sebagai teks bebas di
+// kolom admin_users.role — jadi untuk menjadikan seseorang super admin,
+// set manual lewat SQL: update admin_users set role = 'super_admin' where email = '...';
+export const SUPER_ADMIN_ROLE = "super_admin";
+
 export type AdminUser = {
   id: string;
   email: string;
   name?: string;
   role: string;
 };
+
+export function isSuperAdmin(admin: Pick<AdminUser, "role"> | null | undefined) {
+  return admin?.role === SUPER_ADMIN_ROLE;
+}
 
 type LoginAttempt = {
   count: number;

@@ -206,3 +206,10 @@ export type SessionRow = {
   expiresAt?: string | null;
   isCurrent?: boolean;
 };
+
+export type CurrentAdminInfo = {
+  id: string;
+  email: string;
+  name?: string | null;
+  role: string;
+};

@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { getCurrentAdmin, getCurrentSessionTokenHash } from "@/lib/auth";
+import { getCurrentAdmin, getCurrentSessionTokenHash, isSuperAdmin } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
 import { formatDbError, getColumns, pickColumn, quoteIdent, withClient } from "@/lib/db";
 
 export async function GET() {
   const admin = await getCurrentAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const restrictToSelf = !isSuperAdmin(admin);
 
   try {
     const currentTokenHash = await getCurrentSessionTokenHash();
@@ -23,6 +24,12 @@ export async function GET() {
 
       if (!idColumn || !tokenHashColumn) {
         throw new Error("Kolom id/session_token_hash tidak ditemukan di tabel admin_sessions.");
+      }
+      // Admin biasa cuma boleh lihat sesi miliknya sendiri; super admin
+      // lihat semua sesi semua admin. Ini pengecekan wajib di server —
+      // jangan cuma difilter di frontend.
+      if (restrictToSelf && !userIdColumn) {
+        throw new Error("Kolom user_id tidak ditemukan di tabel admin_sessions.");
       }
 
       // Join ke admin_users supaya tampil nama/email admin pemilik sesi,
@@ -47,6 +54,15 @@ export async function GET() {
         }
       }
 
+      const whereClauses: string[] = [];
+      const params: string[] = [];
+      if (expiresColumn) whereClauses.push(`s.${quoteIdent(expiresColumn)} > now()`);
+      if (restrictToSelf && userIdColumn) {
+        params.push(admin.id);
+        whereClauses.push(`s.${quoteIdent(userIdColumn)}::text = $${params.length}::text`);
+      }
+      const whereClause = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
+
       const result = await client.query(
         `
           SELECT
@@ -62,9 +78,10 @@ export async function GET() {
             ${expiresColumn ? `s.${quoteIdent(expiresColumn)}::text` : "null"} AS expires_at
           FROM ${info.table.sql} s
           ${joinClause}
-          ${expiresColumn ? `WHERE s.${quoteIdent(expiresColumn)} > now()` : ""}
+          ${whereClause}
           ORDER BY ${lastUsedColumn ? `s.${quoteIdent(lastUsedColumn)} DESC NULLS LAST` : `1 DESC`}
-        `
+        `,
+        params
       );
 
       return result.rows.map((row) => ({
@@ -93,6 +110,7 @@ export async function GET() {
 export async function DELETE(request: Request) {
   const admin = await getCurrentAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const restrictToSelf = !isSuperAdmin(admin);
 
   const { id } = await request.json().catch(() => ({}));
   if (!id) {
@@ -106,25 +124,39 @@ export async function DELETE(request: Request) {
       const info = await getColumns(client, "admin_sessions");
       const idColumn = pickColumn(info.columns, ["id"]);
       const tokenHashColumn = pickColumn(info.columns, ["session_token_hash", "token_hash"]);
+      const userIdColumn = pickColumn(info.columns, ["user_id", "userId"]);
 
       if (!idColumn) {
         throw new Error("Kolom id tidak ditemukan di tabel admin_sessions.");
+      }
+      if (restrictToSelf && !userIdColumn) {
+        throw new Error("Kolom user_id tidak ditemukan di tabel admin_sessions.");
+      }
+
+      const whereClauses = [`${quoteIdent(idColumn)}::text = $1::text`];
+      const params: string[] = [id];
+      if (restrictToSelf && userIdColumn) {
+        params.push(admin.id);
+        whereClauses.push(`${quoteIdent(userIdColumn)}::text = $2::text`);
       }
 
       const result = await client.query(
         `
           DELETE FROM ${info.table.sql}
-          WHERE ${quoteIdent(idColumn)}::text = $1::text
+          WHERE ${whereClauses.join(" AND ")}
           RETURNING ${tokenHashColumn ? `${quoteIdent(tokenHashColumn)}::text` : "null"} AS token_hash
         `,
-        [id]
+        params
       );
 
       return result.rows[0] || null;
     });
 
     if (!revoked) {
-      return NextResponse.json({ error: "Sesi tidak ditemukan (mungkin sudah berakhir)." }, { status: 404 });
+      return NextResponse.json(
+        { error: "Sesi tidak ditemukan (mungkin sudah berakhir, atau bukan milikmu)." },
+        { status: 404 }
+      );
     }
 
     const wasCurrentSession = Boolean(currentTokenHash) && revoked.token_hash === currentTokenHash;
