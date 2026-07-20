@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CurrentAdminInfo, SessionRow } from "@/app/admin/types";
+import { CurrentAdminInfo, PaginationInfo, SessionRow } from "@/app/admin/types";
 import { fetchJson, formatIndonesianDateTime } from "@/app/admin/utils";
-import { TableSkeleton } from "@/app/admin/shared";
+import { PaginationControls, TableSkeleton } from "@/app/admin/shared";
 
 export function ActiveSessionsSection() {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
+  const [pagination, setPagination] = useState<PaginationInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -20,12 +21,16 @@ export function ActiveSessionsSection() {
       .catch(() => undefined);
   }, []);
 
-  async function loadSessions() {
+  async function loadSessions(page = 1) {
     setLoading(true);
     setError("");
     try {
-      const data = await fetchJson<{ sessions: SessionRow[] }>("/api/admin/sessions");
+      const params = new URLSearchParams({ page: String(page), limit: "10" });
+      const data = await fetchJson<{ sessions: SessionRow[]; pagination: PaginationInfo }>(
+        `/api/admin/sessions?${params.toString()}`
+      );
       setSessions(data.sessions || []);
+      setPagination(data.pagination || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memuat sesi aktif.");
     } finally {
@@ -34,7 +39,7 @@ export function ActiveSessionsSection() {
   }
 
   useEffect(() => {
-    loadSessions();
+    loadSessions(1);
   }, []);
 
   async function revokeSession(session: SessionRow) {
@@ -62,7 +67,7 @@ export function ActiveSessionsSection() {
       }
 
       setMessage(`Sesi milik ${label} berhasil dicabut.`);
-      await loadSessions();
+      await loadSessions(pagination?.page || 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal mencabut sesi.");
     } finally {
@@ -83,7 +88,7 @@ export function ActiveSessionsSection() {
         </div>
         <button
           className="px-3 py-2 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white rounded-lg text-xs font-semibold"
-          onClick={loadSessions}
+          onClick={() => loadSessions(1)}
           disabled={loading}
           type="button"
         >
@@ -103,41 +108,49 @@ export function ActiveSessionsSection() {
       {loading && !sessions.length ? (
         <TableSkeleton rows={3} columns={4} />
       ) : sessions.length ? (
-        <ul className="divide-y divide-slate-100">
-          {sessions.map((session) => (
-            <li key={session.id} className="p-4 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-slate-800 truncate flex items-center gap-2">
-                  {session.adminName || session.adminEmail || "Admin tidak dikenal"}
-                  {session.isCurrent && (
-                    <span className="shrink-0 px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-[10px] font-bold">
-                      Sesi ini
-                    </span>
-                  )}
-                </p>
-                <p className="text-xs text-slate-400 truncate">
-                  IP: {session.ipAddress || "-"} · Terakhir dipakai: {formatIndonesianDateTime(session.lastUsedAt || undefined)}
-                </p>
-                <p className="text-xs text-slate-400 truncate">
-                  Kedaluwarsa: {formatIndonesianDateTime(session.expiresAt || undefined)}
-                </p>
-                {session.userAgent && (
-                  <p className="text-[11px] text-slate-400 truncate mt-0.5" title={session.userAgent}>
-                    {session.userAgent}
+        <>
+          <ul className="divide-y divide-slate-100">
+            {sessions.map((session) => (
+              <li key={session.id} className="p-4 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-slate-800 truncate flex items-center gap-2">
+                    {session.adminName || session.adminEmail || "Admin tidak dikenal"}
+                    {session.isCurrent && (
+                      <span className="shrink-0 px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-[10px] font-bold">
+                        Sesi ini
+                      </span>
+                    )}
                   </p>
-                )}
-              </div>
-              <button
-                className="shrink-0 px-3 py-1.5 border border-rose-300 text-rose-600 rounded-lg text-xs font-semibold hover:bg-rose-50 disabled:opacity-50"
-                onClick={() => revokeSession(session)}
-                disabled={revokingId === session.id}
-                type="button"
-              >
-                {revokingId === session.id ? "Memproses..." : "Paksa Logout"}
-              </button>
-            </li>
-          ))}
-        </ul>
+                  <p className="text-xs text-slate-400 truncate">
+                    IP: {session.ipAddress || "-"} · Terakhir dipakai: {formatIndonesianDateTime(session.lastUsedAt || undefined)}
+                  </p>
+                  <p className="text-xs text-slate-400 truncate">
+                    Kedaluwarsa: {formatIndonesianDateTime(session.expiresAt || undefined)}
+                  </p>
+                  {session.userAgent && (
+                    <p className="text-[11px] text-slate-400 truncate mt-0.5" title={session.userAgent}>
+                      {session.userAgent}
+                    </p>
+                  )}
+                </div>
+                <button
+                  className="shrink-0 px-3 py-1.5 border border-rose-300 text-rose-600 rounded-lg text-xs font-semibold hover:bg-rose-50 disabled:opacity-50"
+                  onClick={() => revokeSession(session)}
+                  disabled={revokingId === session.id}
+                  type="button"
+                >
+                  {revokingId === session.id ? "Memproses..." : "Paksa Logout"}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="p-4 border-t border-slate-100 bg-slate-50/30">
+            <PaginationControls
+              pagination={pagination || { page: 1, limit: 10, total: sessions.length, totalPages: 1 }}
+              onPageChange={(page) => loadSessions(page)}
+            />
+          </div>
+        </>
       ) : (
         <div className="p-12 text-center text-sm text-slate-400">Tidak ada sesi aktif.</div>
       )}

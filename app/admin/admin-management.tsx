@@ -242,7 +242,7 @@ export function AdminManagementSection() {
                 {admin.is_active ? "Aktif" : "Nonaktif"}
               </span>
               <div className="shrink-0 flex items-center gap-2">
-                {isSuperAdmin && (
+                {isSuperAdmin && !(admin.id === currentAdmin?.id && admin.is_active) && (
                   <button
                     className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50"
                     onClick={() => toggleActive(admin)}

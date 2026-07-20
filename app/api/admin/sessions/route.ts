@@ -3,15 +3,20 @@ import { getCurrentAdmin, getCurrentSessionTokenHash, isSuperAdmin } from "@/lib
 import { writeAuditLog } from "@/lib/audit";
 import { formatDbError, getColumns, pickColumn, quoteIdent, withClient } from "@/lib/db";
 
-export async function GET() {
+export async function GET(request: Request) {
   const admin = await getCurrentAdmin();
   if (!admin) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const restrictToSelf = !isSuperAdmin(admin);
 
+  const url = new URL(request.url);
+  const page = Math.max(1, Number(url.searchParams.get("page") || 1));
+  const limit = Math.min(Math.max(1, Number(url.searchParams.get("limit") || 20)), 100);
+  const offset = (page - 1) * limit;
+
   try {
     const currentTokenHash = await getCurrentSessionTokenHash();
 
-    const rows = await withClient(async (client) => {
+    const { rows, total } = await withClient(async (client) => {
       const info = await getColumns(client, "admin_sessions");
       const idColumn = pickColumn(info.columns, ["id"]);
       const userIdColumn = pickColumn(info.columns, ["user_id", "userId"]);
@@ -63,6 +68,12 @@ export async function GET() {
       }
       const whereClause = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
+      const countResult = await client.query(
+        `SELECT COUNT(*)::int AS total FROM ${info.table.sql} s ${whereClause}`,
+        params
+      );
+      const total = countResult.rows[0]?.total || 0;
+
       const result = await client.query(
         `
           SELECT
@@ -80,25 +91,32 @@ export async function GET() {
           ${joinClause}
           ${whereClause}
           ORDER BY ${lastUsedColumn ? `s.${quoteIdent(lastUsedColumn)} DESC NULLS LAST` : `1 DESC`}
+          LIMIT $${params.length + 1}::int OFFSET $${params.length + 2}::int
         `,
-        params
+        [...params, limit, offset]
       );
 
-      return result.rows.map((row) => ({
-        id: row.id,
-        adminId: row.admin_id,
-        adminName: row.admin_name,
-        adminEmail: row.admin_email,
-        ipAddress: row.ip_address,
-        userAgent: row.user_agent,
-        createdAt: row.created_at,
-        lastUsedAt: row.last_used_at,
-        expiresAt: row.expires_at,
-        isCurrent: Boolean(currentTokenHash) && row.token_hash === currentTokenHash
-      }));
+      return {
+        total,
+        rows: result.rows.map((row) => ({
+          id: row.id,
+          adminId: row.admin_id,
+          adminName: row.admin_name,
+          adminEmail: row.admin_email,
+          ipAddress: row.ip_address,
+          userAgent: row.user_agent,
+          createdAt: row.created_at,
+          lastUsedAt: row.last_used_at,
+          expiresAt: row.expires_at,
+          isCurrent: Boolean(currentTokenHash) && row.token_hash === currentTokenHash
+        }))
+      };
     });
 
-    return NextResponse.json({ sessions: rows });
+    return NextResponse.json({
+      sessions: rows,
+      pagination: { page, limit, total, totalPages: Math.max(Math.ceil(total / limit), 1) }
+    });
   } catch (error) {
     return NextResponse.json(
       { error: formatDbError(error, "Gagal memuat daftar sesi aktif.") },
